@@ -3,302 +3,436 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VaporRAM — google/gemma-4-E4B-it on hardware you own under 1.5 GB RAM</title>
-<meta name="description" content="Run google/gemma-4-E4B-it, an 8-billion parameter state-of-the-art AI model, on consumer hardware under a 1.5 GB RAM ceiling — zero-copy O_DIRECT SSD layer streaming, AVX2 SIMD GEMV, pure C runtime.">
+<title>VaporRAM — Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it</title>
+<meta name="description" content="Stream google/gemma-4-E4B-it dense layers directly from NVMe SSD under a 1.5 GB RAM ceiling using AVX2 SIMD GEMV and zero-copy O_DIRECT prefetching.">
 <meta property="og:title" content="VaporRAM — google/gemma-4-E4B-it under 1.5 GB RAM">
-<meta property="og:description" content="Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it under 1.5 GB RAM: pure C, zero dependencies, layers streamed from NVMe SSD with POSIX prefetching.">
+<meta property="og:description" content="Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it under 1.5 GB RAM.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://sudsarkar13.github.io/vapor-ram/">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;1,8..60,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-:root{
-  --cream:#F0EDE4; --tan:#E7E0D1; --tan2:#DFD7C6; --card-line:#D2CAB7;
-  --ink:#191817; --ink2:#3c3931; --gray:#726b5e; --faint:#a49c8b;
-  --dark:#141311; --on-dark:#EDE9DF; --on-dark-dim:#a7a094;
-  --hair:#dcd6c8; --clay:#b3603f; --teal:#2a7b75; --accent-blue:#2d68c4;
-  --sans:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-  --serif:'Source Serif 4',Georgia,'Times New Roman',serif;
-  --mono:'JetBrains Mono',monospace;
-  --maxw:1200px;
+:root {
+  --bg-dark: #0B0F19;
+  --bg-card: rgba(17, 24, 39, 0.75);
+  --bg-card-hover: rgba(31, 41, 55, 0.85);
+  --border-glow: rgba(59, 130, 246, 0.25);
+  --border-light: rgba(255, 255, 255, 0.1);
+  --text-main: #F9FAFB;
+  --text-muted: #9CA3AF;
+  --cyan: #06B6D4;
+  --indigo: #6366F1;
+  --emerald: #10B981;
+  --amber: #F59E0B;
+  --sans: 'Outfit', 'Inter', -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+  --maxw: 1200px;
 }
-*{margin:0;padding:0;box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{background:var(--cream);color:var(--ink);font-family:var(--sans);line-height:1.5;
-  -webkit-font-smoothing:antialiased;overflow-x:hidden;font-size:17px}
-a{color:inherit;text-decoration:none}
-::selection{background:rgba(179,96,63,.16)}
-.wrap{max-width:var(--maxw);margin:0 auto;padding:0 clamp(1.3rem,4vw,2.6rem)}
-.serif{font-family:var(--serif)}
-.mono{font-family:var(--mono)}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg-dark);
+  color: var(--text-main);
+  font-family: var(--sans);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+a { color: inherit; text-decoration: none; }
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 4vw, 2.5rem); }
 
 /* Navigation */
-nav{position:fixed;inset:0 0 auto 0;z-index:50;background:rgba(240,237,228,.92);backdrop-filter:blur(12px);transition:border-color .25s;border-bottom:1px solid transparent}
-nav.on{border-color:var(--hair)}
-nav .in{max-width:var(--maxw);margin:0 auto;display:flex;align-items:center;padding:.9rem clamp(1.3rem,4vw,2.6rem)}
-nav .brand{display:flex;align-items:center;gap:.6rem;font-family:'Space Grotesk',var(--sans);font-weight:700;font-size:1.45rem;letter-spacing:-.02em}
-nav .brand .badge-tag{background:var(--ink);color:var(--cream);font-size:.68rem;padding:.2rem .45rem;border-radius:4px;font-family:var(--mono);text-transform:uppercase}
-nav .nl{margin-left:auto;display:flex;gap:1.8rem;align-items:center;font-weight:500;font-size:.96rem}
-nav .nl a:not(.btn){color:var(--ink2)} nav .nl a:not(.btn):hover{color:var(--ink)}
-.btn{font-family:var(--sans);font-weight:600;font-size:.94rem;display:inline-flex;align-items:center;gap:.45rem;
-  background:var(--ink);color:var(--cream);padding:.65rem 1.2rem;border-radius:8px;transition:.15s;border:1.5px solid var(--ink);cursor:pointer}
-.btn:hover{background:#000;border-color:#000;transform:translateY(-1px)}
-.btn.ghost{background:transparent;color:var(--ink);border-color:var(--card-line)}
-.btn.ghost:hover{background:transparent;border-color:var(--ink)}
-@media(max-width:820px){nav .nl a:not(.btn){display:none}}
+nav {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 50;
+  background: rgba(11, 15, 25, 0.85);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border-light);
+}
+nav .in {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 1.1rem clamp(1.2rem, 4vw, 2.5rem);
+}
+nav .brand {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  font-weight: 800;
+  font-size: 1.5rem;
+  letter-spacing: -.03em;
+  background: linear-gradient(135deg, var(--cyan), var(--indigo));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+nav .brand .vtag {
+  background: rgba(6, 182, 212, 0.15);
+  color: var(--cyan);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  font-size: .72rem;
+  padding: .2rem .5rem;
+  border-radius: 6px;
+  font-family: var(--mono);
+  -webkit-text-fill-color: var(--cyan);
+}
+nav .nl {
+  margin-left: auto;
+  display: flex;
+  gap: 2rem;
+  align-items: center;
+  font-weight: 500;
+  font-size: .95rem;
+}
+nav .nl a:not(.btn-glow) { color: var(--text-muted); transition: color .2s; }
+nav .nl a:not(.btn-glow):hover { color: var(--text-main); }
 
-/* Hero Section */
-.hero{padding:9.5rem 0 4.5rem}
-.hero-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:3rem;align-items:end}
-@media(max-width:860px){.hero-grid{grid-template-columns:1fr;gap:1.8rem}}
-.hero h1{font-weight:800;font-size:clamp(2.6rem,5.8vw,4.5rem);line-height:1.03;letter-spacing:-.03em;text-wrap:balance}
-.hero h1 u{text-decoration:none;border-bottom:.11em solid var(--ink);padding-bottom:.02em}
-.hero .aside{font-family:var(--serif);font-size:clamp(1.1rem,1.6vw,1.3rem);line-height:1.48;color:var(--ink2);max-width:28rem}
-.hero .cta{display:flex;gap:.75rem;margin-top:2.4rem;flex-wrap:wrap}
+.btn-glow {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: .92rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  background: linear-gradient(135deg, var(--cyan), var(--indigo));
+  color: #fff;
+  padding: .65rem 1.3rem;
+  border-radius: 8px;
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
+  transition: all .25s ease;
+  border: none;
+  cursor: pointer;
+}
+.btn-glow:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 30px rgba(6, 182, 212, 0.5);
+}
 
-/* Badges Bar */
-.badges-bar{display:flex;gap:.7rem;margin-top:1.8rem;flex-wrap:wrap}
-.badge-pill{display:inline-flex;align-items:center;gap:.4rem;padding:.3rem .75rem;background:var(--tan);border:1px solid var(--card-line);border-radius:20px;font-size:.82rem;font-weight:600;color:var(--ink2)}
-.badge-pill .dot{width:7px;height:7px;border-radius:50%;background:#10b981}
+.btn-ghost {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: .92rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-main);
+  padding: .65rem 1.3rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  transition: all .25s ease;
+}
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
 
-/* Dark Highlight Section */
-.block-dark{background:var(--dark);color:var(--on-dark);position:relative;overflow:hidden}
-.block-dark .inner{max-width:920px;margin:0 auto;padding:clamp(4.5rem,9vh,6.5rem) clamp(1.3rem,4vw,2.6rem);text-align:center}
-.block-dark h2{font-family:var(--serif);font-weight:400;font-size:clamp(2.1rem,4.8vw,3.3rem);line-height:1.12;letter-spacing:-.01em;text-wrap:balance}
-.block-dark p{color:var(--on-dark-dim);font-size:1.1rem;max-width:42rem;margin:1.1rem auto 0;line-height:1.52}
+/* Hero */
+.hero {
+  padding: 10rem 0 5rem;
+  position: relative;
+}
+.hero-glow {
+  position: absolute;
+  top: 5%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 600px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(6, 182, 212, 0.12) 0%, rgba(99, 102, 241, 0.08) 50%, transparent 70%);
+  filter: blur(80px);
+  pointer-events: none;
+}
+.hero h1 {
+  font-weight: 800;
+  font-size: clamp(2.8rem, 6vw, 4.8rem);
+  line-height: 1.05;
+  letter-spacing: -.03em;
+  max-width: 900px;
+}
+.hero h1 .gradient-text {
+  background: linear-gradient(135deg, #FFF, var(--cyan), var(--indigo));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.hero .lead-text {
+  font-size: clamp(1.15rem, 1.8vw, 1.35rem);
+  color: var(--text-muted);
+  max-width: 720px;
+  margin-top: 1.5rem;
+  font-weight: 400;
+}
+.hero .cta-row {
+  display: flex;
+  gap: 1rem;
+  margin-top: 2.5rem;
+  flex-wrap: wrap;
+}
 
-/* Interactive Canvas Diagram */
-.sim-container{margin-top:2.5rem;background:#1c1b18;border:1px solid #33302a;border-radius:12px;padding:1.5rem;text-align:left}
-.sim-header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #2d2a24;padding-bottom:.8rem;margin-bottom:1.2rem}
-.sim-title{font-family:var(--mono);font-size:.85rem;color:var(--on-dark-dim);text-transform:uppercase;letter-spacing:.05em}
-.sim-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem}
-.sim-card{background:#141311;border:1px solid #2d2a24;border-radius:8px;padding:1rem}
-.sim-label{font-size:.78rem;color:var(--on-dark-dim);text-transform:uppercase;font-weight:600}
-.sim-value{font-family:var(--mono);font-size:1.5rem;color:var(--on-dark);font-weight:700;margin-top:.2rem}
-.sim-progress-bg{width:100%;height:8px;background:#2d2a24;border-radius:4px;margin-top:.6rem;overflow:hidden}
-.sim-progress-fill{height:100%;background:linear-gradient(90deg,#10b981,#3b82f6);width:9.5%;transition:width .5s}
+/* Status Badges */
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.2rem;
+  margin-top: 4rem;
+}
+.status-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border-glow);
+  border-radius: 12px;
+  padding: 1.4rem;
+  position: relative;
+  overflow: hidden;
+}
+.status-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, var(--cyan), var(--indigo));
+}
+.status-card .label {
+  font-size: .8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-weight: 600;
+}
+.status-card .value {
+  font-family: var(--mono);
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-top: .3rem;
+}
 
-/* Generic Section */
-section{padding:clamp(4.5rem,8vh,6.5rem) 0}
-.eyebrow{font-weight:700;font-size:1.1rem;letter-spacing:-.01em;margin-bottom:1.8rem;text-transform:uppercase;color:var(--gray)}
-.lead{font-family:var(--serif);color:var(--ink2);max-width:44rem;font-size:clamp(1.1rem,1.6vw,1.28rem);line-height:1.5}
+/* Feature Grid */
+section { padding: 6rem 0; }
+.section-title {
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 800;
+  letter-spacing: -.02em;
+}
+.section-sub {
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  max-width: 600px;
+  margin-top: .5rem;
+}
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.8rem;
+  margin-top: 3rem;
+}
+.card-glass {
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border-light);
+  border-radius: 16px;
+  padding: 2rem;
+  transition: all .3s ease;
+}
+.card-glass:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-glow);
+  transform: translateY(-4px);
+}
+.card-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(6, 182, 212, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cyan);
+  margin-bottom: 1.4rem;
+}
+.card-glass h3 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-bottom: .6rem;
+}
+.card-glass p {
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1.6;
+}
 
-/* Feature Cards Grid */
-.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:1.4rem;margin-top:2rem}
-@media(max-width:900px){.cards{grid-template-columns:1fr}}
-.card{background:var(--tan);border-radius:12px;padding:1.7rem 1.6rem 1.6rem;display:flex;flex-direction:column;transition:.16s;border:1px solid var(--card-line)}
-.card:hover{background:var(--tan2);transform:translateY(-3px)}
-.card h3{font-weight:700;font-size:1.32rem;letter-spacing:-.02em;margin-bottom:.5rem}
-.card .desc{font-family:var(--serif);color:var(--ink2);font-size:1.02rem;line-height:1.45;flex:1}
-.meta{margin-top:1.4rem}
-.meta .row{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;padding:.65rem 0;border-top:1px solid var(--card-line)}
-.meta .k{font-weight:700;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--gray)}
-.meta .v{font-family:var(--mono);font-size:.92rem;color:var(--ink);font-weight:600}
-
-/* Hardware Benchmarks Table */
-.dlist{margin-top:2.4rem;border-top:1px solid var(--hair)}
-.dlist .drow{display:grid;grid-template-columns:1fr auto;gap:1.5rem;align-items:center;
-  padding:1.15rem .2rem;border-bottom:1px solid var(--hair);transition:.14s}
-.dlist .drow:hover{padding-left:.5rem;background:rgba(231,224,209,.4)}
-.dlist .name{font-weight:600;font-size:1.08rem;letter-spacing:-.01em}
-.dlist .sub{color:var(--gray);font-size:.9rem;margin-top:.15rem}
-.dlist .spd{font-family:var(--serif);font-size:1.15rem;white-space:nowrap;text-align:right;font-weight:600}
-.dlist .hi{color:var(--clay)}
-
-/* Terminal Code Blocks */
-.term{background:var(--dark);color:var(--on-dark);border-radius:10px;padding:1.4rem;font-family:var(--mono);font-size:.92rem;line-height:1.6;margin-top:1.2rem;overflow-x:auto;position:relative;border:1px solid #2d2a24}
-.term .cmd{color:#6EE7B7}
-.term .cmt{color:var(--on-dark-dim)}
-.copy-btn{position:absolute;top:.8rem;right:.8rem;background:#2d2a24;color:var(--on-dark-dim);border:none;border-radius:4px;padding:.3rem .6rem;font-size:.75rem;cursor:pointer;transition:.15s}
-.copy-btn:hover{color:var(--on-dark);background:#3c3931}
+/* Code Playground */
+.code-block {
+  background: #060911;
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  padding: 1.5rem;
+  font-family: var(--mono);
+  font-size: .95rem;
+  line-height: 1.7;
+  position: relative;
+  overflow-x: auto;
+  margin-top: 1.5rem;
+}
+.code-block .cmd { color: var(--cyan); }
+.code-block .cmt { color: #6B7280; }
+.copy-btn {
+  position: absolute;
+  top: .8rem;
+  right: .8rem;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: .35rem .7rem;
+  font-size: .78rem;
+  cursor: pointer;
+  transition: all .2s;
+}
+.copy-btn:hover { background: rgba(255, 255, 255, 0.15); color: var(--text-main); }
 
 /* Footer */
-footer{padding:4rem 0 3rem;border-top:1px solid var(--hair);background:var(--tan)}
-footer .in{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1.5rem}
-footer .copy{font-size:.92rem;color:var(--gray)}
-footer .links{display:flex;gap:1.5rem;font-weight:600;font-size:.92rem}
+footer {
+  border-top: 1px solid var(--border-light);
+  padding: 4rem 0 3rem;
+  background: #070A12;
+}
+footer .in {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+footer .copy { color: var(--text-muted); font-size: .95rem; }
+footer .flinks { display: flex; gap: 1.8rem; font-weight: 500; font-size: .95rem; }
+footer .flinks a { color: var(--text-muted); transition: color .2s; }
+footer .flinks a:hover { color: var(--cyan); }
 </style>
 </head>
 <body>
 
 <!-- Navigation -->
-<nav id="navbar">
+<nav>
   <div class="in">
     <div class="brand">
-      💨 VaporRAM <span class="badge-tag">v1.0.1</span>
+      💨 VaporRAM <span class="vtag">v1.0.1</span>
     </div>
     <div class="nl">
       <a href="#features">Architecture</a>
-      <a href="#benchmarks">Benchmarks</a>
+      <a href="#metrics">Metrics</a>
       <a href="#quickstart">Quickstart</a>
       <a href="https://pypi.org/project/vapor-ram/" target="_blank">PyPI</a>
-      <a href="https://github.com/sudsarkar13/vapor-ram" target="_blank" class="btn">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
-        GitHub
-      </a>
+      <a href="https://github.com/sudsarkar13/vapor-ram" target="_blank" class="btn-glow">GitHub Repo</a>
     </div>
   </div>
 </nav>
 
-<!-- Hero Section -->
+<!-- Hero -->
 <div class="hero wrap">
-  <div class="hero-grid">
-    <div>
-      <h1><u>google/gemma-4-E4B-it</u> on hardware you own under 1.5 GB RAM</h1>
-      <div class="badges-bar">
-        <div class="badge-pill"><span class="dot"></span> Active Peak RSS: 142.3 MB</div>
-        <div class="badge-pill">Target RAM Ceiling: &lt; 1.5 GB</div>
-        <div class="badge-pill">AVX2 GEMV: 204.7 GFLOPS</div>
-      </div>
-      <div class="cta">
-        <a href="https://pypi.org/project/vapor-ram/" target="_blank" class="btn">pip install vapor-ram</a>
-        <a href="https://github.com/sudsarkar13/vapor-ram/releases/tag/v1.0.1" target="_blank" class="btn ghost">v1.0.1 Linux Release</a>
-      </div>
+  <div class="hero-glow"></div>
+  <h1>
+    <span class="gradient-text">Zero Memory Pressure.</span><br>
+    Stream Gemma 4 E4B-it under 1.5 GB RAM.
+  </h1>
+  <p class="lead-text">
+    VaporRAM is a high-performance C/C++ engine engineered to stream dense 8B model layers sequentially from NVMe SSDs directly into RAM, achieving lightning fast local inference on consumer hardware.
+  </p>
+
+  <div class="cta-row">
+    <a href="https://pypi.org/project/vapor-ram/" target="_blank" class="btn-glow">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+      pip install vapor-ram
+    </a>
+    <a href="https://github.com/sudsarkar13/vapor-ram/releases/tag/v1.0.1" target="_blank" class="btn-ghost">
+      v1.0.1 Standalone Tarball (.tar.gz)
+    </a>
+  </div>
+
+  <div class="status-grid">
+    <div class="status-card">
+      <div class="label">Target RAM Ceiling</div>
+      <div class="value" style="color:var(--emerald);">&lt; 1.5 GB</div>
     </div>
-    <div class="aside serif">
-      Run Gemma 4 E4B-it — an 8-billion parameter state-of-the-art language model — on laptops and desktops under 1.5 GB RAM. Pure C SIMD engine, unbuffered <code class="mono">O_DIRECT</code> SSD layer streaming, zero memory pressure.
+    <div class="status-card">
+      <div class="label">Measured Peak RSS</div>
+      <div class="value" style="color:var(--cyan);">142.32 MB</div>
+    </div>
+    <div class="status-card">
+      <div class="label">AVX2 GEMV Core</div>
+      <div class="value" style="color:var(--indigo);">204.7 GFLOPS</div>
+    </div>
+    <div class="status-card">
+      <div class="label">RAM Budget Usage</div>
+      <div class="value">9.5%</div>
     </div>
   </div>
 </div>
 
-<!-- Interactive Dark Section -->
-<div class="block-dark">
-  <div class="inner">
-    <h2>Memory vaporized. Layers streamed.</h2>
-    <p>Traditional engines load 16GB+ of weights into system RAM. VaporRAM streams 140MB transformer layers sequentially from NVMe SSD into a double-buffered 300MB workspace, reducing active memory consumption to under 145 MB.</p>
-    
-    <div class="sim-container">
-      <div class="sim-header">
-        <div class="sim-title">VaporRAM Memory Footprint Monitor</div>
-        <div class="mono" style="font-size:.78rem;color:#10b981;">● STATUS: COMPLIANT</div>
-      </div>
-      <div class="sim-grid">
-        <div class="sim-card">
-          <div class="sim-label">Target RAM Ceiling</div>
-          <div class="sim-value">&lt; 1500 MB</div>
-        </div>
-        <div class="sim-card">
-          <div class="sim-label">Measured Peak RSS</div>
-          <div class="sim-value" style="color:#10b981;">142.32 MB</div>
-        </div>
-        <div class="sim-card">
-          <div class="sim-label">Major Page Faults</div>
-          <div class="sim-value">0</div>
-        </div>
-        <div class="sim-card">
-          <div class="sim-label">SIMD GEMV Speedup</div>
-          <div class="sim-value" style="color:#3b82f6;">7.70x</div>
-        </div>
-      </div>
-      <div style="margin-top:1.2rem;font-size:.82rem;color:var(--on-dark-dim);display:flex;justify-content:space-between;">
-        <span>RAM Ceiling Budget Usage</span>
-        <span class="mono">9.5% Used</span>
-      </div>
-      <div class="sim-progress-bg">
-        <div class="sim-progress-fill"></div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Architecture Features Grid -->
+<!-- Architecture Features -->
 <section id="features" class="wrap">
-  <div class="eyebrow">Key Technical Innovations</div>
-  <div class="lead">Engineered from the ground up for low-spec hardware without compromising state-of-the-art model capabilities.</div>
-  
-  <div class="cards">
-    <div class="card">
-      <h3>Sequential Layer Pipeline</h3>
-      <div class="desc">Streams 32 dense layers sequentially from NVMe storage using POSIX unbuffered <code class="mono">O_DIRECT</code> I/O and asynchronous <code class="mono">posix_fadvise</code> kernel hints.</div>
-      <div class="meta">
-        <div class="row"><div class="k">Layer Buffer</div><div class="v">140 MB / Layer</div></div>
-        <div class="row"><div class="k">Prefetch Hint</div><div class="v">POSIX_FADV_WILLNEED</div></div>
+  <h2 class="section-title">Core Architecture</h2>
+  <p class="section-sub">Empirical optimization for low-spec laptops and serverless deployments.</p>
+
+  <div class="cards-grid">
+    <div class="card-glass">
+      <div class="card-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
       </div>
+      <h3>Sequential Layer Streaming</h3>
+      <p>Streams 32 dense transformer layers using POSIX unbuffered <code class="mono" style="color:var(--cyan);">O_DIRECT</code> reads with asynchronous <code class="mono" style="color:var(--cyan);">posix_fadvise</code> kernel hints, maintaining constant RAM usage.</p>
     </div>
 
-    <div class="card">
-      <h3>AVX2 + OpenMP Core</h3>
-      <div class="desc">C SIMD kernels with FMA3 multiply-accumulate and multi-threaded parallelization optimized for modern x86_64 CPUs.</div>
-      <div class="meta">
-        <div class="row"><div class="k">Throughput</div><div class="v">204,795 GFLOPS</div></div>
-        <div class="row"><div class="k">Threads</div><div class="v">16 CPU Cores</div></div>
+    <div class="card-glass">
+      <div class="card-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
       </div>
+      <h3>AVX2 SIMD Accelerators</h3>
+      <p>Hand-crafted FMA3 matrix-vector kernels multi-threaded with OpenMP to achieve <strong style="color:var(--emerald);">7.70x speedup</strong> over scalar CPU computation.</p>
     </div>
 
-    <div class="card">
+    <div class="card-glass">
+      <div class="card-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M21 19c0 1.66-4 3-9 3s-9-1.34-9-3"></path></svg>
+      </div>
       <h3>int8 Quantized KV Cache</h3>
-      <div class="desc">Quantizes attention Key and Value states to signed 8-bit integers with per-token scale factors, saving over 80% memory during long chats.</div>
-      <div class="meta">
-        <div class="row"><div class="k">KV Quantization</div><div class="v">int8 + per-token scale</div></div>
-        <div class="row"><div class="k">Context Ceiling</div><div class="v">&lt; 250 MB</div></div>
-      </div>
+      <p>Attention Key and Value states are dynamically quantized to int8 with per-token scale factors, reducing context RAM overhead to less than 250 MB.</p>
     </div>
   </div>
 </section>
 
-<!-- Hardware Benchmarks -->
-<section id="benchmarks" style="background:var(--tan);border-top:1px solid var(--card-line);border-bottom:1px solid var(--card-line);">
-  <div class="wrap">
-    <div class="eyebrow">Empirical Benchmarks</div>
-    <div class="lead">Tested on everyday consumer hardware (Lenovo IdeaPad Flex 5 with AMD Ryzen 7 5700U & Micron NVMe SSD).</div>
-
-    <div class="dlist">
-      <div class="drow">
-        <div>
-          <div class="name">Peak Resident Set Size (RSS)</div>
-          <div class="sub">Active memory footprint measured during full 32-layer prompt generation</div>
-        </div>
-        <div class="spd hi">142.32 MB</div>
-      </div>
-
-      <div class="drow">
-        <div>
-          <div class="name">AVX2 SIMD Core Speedup</div>
-          <div class="sub">Matrix-Vector multiplication throughput compared to scalar CPU loop</div>
-        </div>
-        <div class="spd hi">7.70x Faster (204.7 GFLOPS)</div>
-      </div>
-
-      <div class="drow">
-        <div>
-          <div class="name">RAM Ceiling Compliance</div>
-          <div class="sub">Budget allocation safety threshold (&lt; 1500 MB RAM limit)</div>
-        </div>
-        <div class="spd hi">PASS (9.5% Allocated)</div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Quick Start Guide -->
+<!-- Quickstart -->
 <section id="quickstart" class="wrap">
-  <div class="eyebrow">Quickstart & Installation</div>
-  <div class="lead">Get up and running in seconds via PyPI or source executable.</div>
+  <h2 class="section-title">Quickstart Guide</h2>
+  <p class="section-sub">Deploy in seconds with Python or run as a standalone C runtime.</p>
 
   <div style="margin-top:2rem;">
-    <h4 style="font-size:1.15rem;font-weight:700;">1. Install via PyPI</h4>
-    <div class="term">
+    <h4 style="font-size:1.1rem;font-weight:600;color:var(--text-main);">1. Install from PyPI</h4>
+    <div class="code-block">
       <button class="copy-btn" onclick="navigator.clipboard.writeText('pip install vapor-ram')">Copy</button>
       <span class="cmd">pip install vapor-ram</span>
     </div>
   </div>
 
   <div style="margin-top:2rem;">
-    <h4 style="font-size:1.15rem;font-weight:700;">2. Launch Web Dashboard</h4>
-    <div class="term">
+    <h4 style="font-size:1.1rem;font-weight:600;color:var(--text-main);">2. Launch Web Dashboard</h4>
+    <div class="code-block">
       <button class="copy-btn" onclick="navigator.clipboard.writeText('vapor web')">Copy</button>
       <span class="cmd">vapor web</span>
-      <br><span class="cmt"># Launches local HTTP server and opens http://localhost:8000/</span>
+      <br><span class="cmt"># Starts local server and opens browser interface at http://localhost:8000/</span>
     </div>
   </div>
 
   <div style="margin-top:2rem;">
-    <h4 style="font-size:1.15rem;font-weight:700;">3. Host Network LAN Gateway</h4>
-    <div class="term">
+    <h4 style="font-size:1.1rem;font-weight:600;color:var(--text-main);">3. Host LAN Gateway Server</h4>
+    <div class="code-block">
       <button class="copy-btn" onclick="navigator.clipboard.writeText('vapor serve --host 0.0.0.0 --port 8000')">Copy</button>
       <span class="cmd">vapor serve --host 0.0.0.0 --port 8000</span>
-      <br><span class="cmt"># Exposes /v1/chat/completions and /v1/responses endpoints to local devices</span>
+      <br><span class="cmt"># Exposes OpenAI-compatible endpoints (/v1/chat/completions, /v1/responses) across LAN</span>
     </div>
   </div>
 </section>
@@ -309,20 +443,13 @@ footer .links{display:flex;gap:1.5rem;font-weight:600;font-size:.92rem}
     <div class="copy">
       © 2026 <strong>Sudeepta Sarkar (sudsarkar13)</strong>. Licensed under Apache 2.0.
     </div>
-    <div class="links">
+    <div class="flinks">
       <a href="https://pypi.org/project/vapor-ram/" target="_blank">PyPI Package</a>
-      <a href="https://github.com/sudsarkar13/vapor-ram" target="_blank">GitHub Repository</a>
-      <a href="https://github.com/sudsarkar13/vapor-ram/releases/tag/v1.0.1" target="_blank">Releases</a>
+      <a href="https://github.com/sudsarkar13/vapor-ram" target="_blank">GitHub</a>
+      <a href="https://github.com/sudsarkar13/vapor-ram/releases/tag/v1.0.1" target="_blank">v1.0.1 Release</a>
     </div>
   </div>
 </footer>
 
-<script>
-window.addEventListener('scroll', () => {
-  const nav = document.getElementById('navbar');
-  if (window.scrollY > 20) nav.classList.add('on');
-  else nav.classList.remove('on');
-});
-</script>
 </body>
 </html>
