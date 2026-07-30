@@ -11,7 +11,7 @@ build_c_engine()
 
 setup(
     name="vapor-ram",
-    version="1.0.0",
+    version="1.0.1",
     description="Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it (< 1.5 GB RAM)",
     long_description=open("README.md").read() if os.path.exists("README.md") else "",
     long_description_content_type="text/markdown",
@@ -19,7 +19,7 @@ setup(
     author_email="sudsarkar13@gmail.com",
     license="Apache-2.0",
     packages=find_packages(),
-    py_modules=["doctor", "resource_plan", "openai_server", "config"],
+    py_modules=["doctor", "resource_plan", "openai_server", "config", "version"],
     scripts=["vapor"],
     include_package_data=True,
     package_data={
