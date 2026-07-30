@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 *.o
 *.tar.gz
+dist/
+build/
+*.egg-info/
 c/vapor_engine
 c/simd_bench
 .DS_Store
