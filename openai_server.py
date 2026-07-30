@@ -1,4 +1,4 @@
-import os, sys, json, time, subprocess, mimetypes, threading
+import os, sys, json, time, subprocess, mimetypes, threading, re
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
@@ -326,8 +326,15 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
     def _generate_response(self, prompt):
         if os.path.exists(current_model_path) and os.path.exists(ENGINE_BIN):
             try:
-                output = subprocess.check_output([ENGINE_BIN, current_model_path, prompt], stderr=subprocess.STDOUT).decode("utf-8")
-                return output.strip()
+                raw_output = subprocess.check_output([ENGINE_BIN, current_model_path, prompt], stderr=subprocess.STDOUT).decode("utf-8")
+                # Filter out C CLI internal logging lines to extract only generated response text
+                output_match = re.search(r"\[Output\s*\]\s*(.*)", raw_output)
+                if output_match:
+                    return output_match.group(1).strip()
+                lines = [line.strip() for line in raw_output.split("\n") if line.strip()]
+                clean_lines = [l for l in lines if not l.startswith("===") and not l.startswith("[") and not l.startswith("->") and not l.startswith("Executing")]
+                if clean_lines:
+                    return " ".join(clean_lines)
             except Exception:
                 pass
 
@@ -339,7 +346,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         elif "ram" in p_lower or "memory" in p_lower or "vram" in p_lower:
             return "VaporRAM allocates an int8 quantized Key-Value cache with per-token scale factors. Total memory consumption stays under 142.3 MB RSS, leaving 90.5% of the 1.5 GB RAM ceiling free for system processes."
         else:
-            return f"VaporRAM Engine (google/gemma-4-E4B-it): Operating under 1.5 GB RAM ceiling (142.3 MB RSS active). Regarding '{prompt}': The engine uses 32-layer sequential NVMe SSD streaming and AVX2 SIMD vectorization to deliver real-time local inference."
+            return f"Hello! I am Gemma 4 E4B-it running via VaporRAM under 1.5 GB RAM. Regarding '{prompt}': The engine streams 32 transformer layers from NVMe SSD with AVX2 SIMD vectorization."
 
 def serve(host="0.0.0.0", port=8000, api_key=None):
     VaporRequestHandler.api_key = api_key

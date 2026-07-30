@@ -10,7 +10,7 @@ DIST_DIR = os.path.join(HERE, "web", "dist")
 
 MODEL_DETECTION_UI_HTML = """
 <!-- VaporRAM Model Detection & Connection Bar -->
-<div id="vapor-model-bar" style="background:#071018;border-bottom:1px solid rgba(6,182,212,0.2);padding:0.4rem 1rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#f9fafb;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;z-index:999;box-sizing:border-box;">
+<div id="vapor-model-bar" style="position:sticky;top:0;left:0;width:100%;background:#071018;border-bottom:1px solid rgba(6,182,212,0.2);padding:0.4rem 1rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#f9fafb;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;z-index:9999;box-sizing:border-box;">
   <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
     <span style="font-weight:700;font-size:0.85rem;color:#06b6d4;letter-spacing:0.02em;">💨 VaporRAM</span>
     <span id="model-status-badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);font-size:0.72rem;padding:0.2rem 0.5rem;border-radius:5px;font-weight:600;">● Weights Loaded (google/gemma-4-E4B-it)</span>
@@ -192,7 +192,7 @@ def fix_js_bundle(js_path):
     print(" -> JS Bundle Branding Updated ✓")
 
 def fix_css_bundle(css_path):
-    print(f"[2/3] Processing CSS bundle & Adding Laptop/Mobile Screen Optimization: {os.path.basename(css_path)}")
+    print(f"[2/3] Processing CSS bundle & Adding Laptop Screen Layout Optimization: {os.path.basename(css_path)}")
     with open(css_path, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -201,12 +201,14 @@ def fix_css_bundle(css_path):
     content = content.replace("#052118", "#071927")
 
     responsive_css = """
-/* VaporRAM Screen Layout Optimization for Laptops (1366x768 / 1472x937) & Mobile */
+/* VaporRAM Screen Layout Optimization for Laptops & Desktops */
 html, body {
-  height: 100% !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
   margin: 0 !important;
   padding: 0 !important;
   overflow: hidden !important;
+  box-sizing: border-box !important;
 }
 
 #root {
@@ -214,6 +216,7 @@ html, body {
   max-height: calc(100vh - 38px) !important;
   display: flex !important;
   flex-direction: column !important;
+  overflow: hidden !important;
 }
 
 #root > div {
@@ -232,6 +235,11 @@ main, div[class*="main"], div[class*="chat"] {
   max-height: 100% !important;
   display: flex !important;
   flex-direction: column !important;
+  overflow-y: hidden !important;
+}
+
+div[class*="messages"], div[class*="chat-messages"] {
+  flex: 1 !important;
   overflow-y: auto !important;
 }
 
