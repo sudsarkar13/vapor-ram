@@ -29,6 +29,11 @@ StreamingReader* streaming_io_init(const char *model_path, size_t layer_size) {
         return NULL;
     }
 
+    // Hint Linux kernel for sequential NVMe reading
+    #ifdef POSIX_FADV_SEQUENTIAL
+    posix_fadvise(reader->fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+    #endif
+
     // Allocate 4096-byte aligned double buffers
     if (posix_memalign(&reader->buffer_a, ALIGNMENT, layer_size) != 0 ||
         posix_memalign(&reader->buffer_b, ALIGNMENT, layer_size) != 0) {
@@ -46,6 +51,11 @@ void* streaming_io_load_layer(StreamingReader *reader, int layer_idx) {
 
     void *target_buf = (reader->current_buf == 0) ? reader->buffer_a : reader->buffer_b;
     off_t offset = (off_t)layer_idx * reader->layer_size;
+
+    // Hint Linux kernel to prefetch next layer from NVMe storage into kernel buffer
+    #ifdef POSIX_FADV_WILLNEED
+    posix_fadvise(reader->fd, offset + reader->layer_size, reader->layer_size, POSIX_FADV_WILLNEED);
+    #endif
 
     ssize_t bytes_read = pread(reader->fd, target_buf, reader->layer_size, offset);
     if (bytes_read < 0) {
