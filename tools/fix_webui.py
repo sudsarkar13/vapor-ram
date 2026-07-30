@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-VaporRAM — Web UI Brand, Aesthetics, Model Detection & Mobile Layout Transformer
-Replaces old Colibri branding, updates color palette, adds Model Detection/Installer UI, and mobile responsive styles.
+VaporRAM — Web UI Brand, Aesthetics, Model Detection & Realtime Progress Bar Transformer
+Replaces old Colibri branding, updates color palette, adds Model Detection/Installer UI with live percentage progress bar, and mobile responsive styles.
 """
 import os, sys, re
 
@@ -25,6 +25,17 @@ MODEL_DETECTION_UI_HTML = """
   </div>
 </div>
 
+<!-- Realtime Installation & Loading Progress Bar -->
+<div id="vapor-progress-container" style="display:none;background:#0b1522;border-bottom:1px solid rgba(6,182,212,0.3);padding:0.6rem 1.2rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;">
+  <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;margin-bottom:0.35rem;">
+    <span id="vapor-progress-msg" style="color:#06b6d4;font-weight:600;">Initializing installation...</span>
+    <span id="vapor-progress-pct" style="color:#f9fafb;font-weight:700;font-family:monospace;">0%</span>
+  </div>
+  <div style="width:100%;height:8px;background:#152436;border-radius:4px;overflow:hidden;">
+    <div id="vapor-progress-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#06b6d4,#6366f1);transition:width 0.4s ease;"></div>
+  </div>
+</div>
+
 <script>
 async function vaporCheckStatus() {
   try {
@@ -45,6 +56,34 @@ async function vaporCheckStatus() {
       statusBadge.style.color = '#f59e0b';
       statusBadge.innerText = '⚠️ Weights Required (Click Download Weights)';
       connBadge.innerText = 'Simulation Mode (< 1.5 GB RAM)';
+    }
+  } catch (e) {}
+}
+
+async function vaporPollProgress() {
+  try {
+    const res = await fetch('/v1/system/progress');
+    const data = await res.json();
+    const progress = data.download_progress;
+    const container = document.getElementById('vapor-progress-container');
+    const msg = document.getElementById('vapor-progress-msg');
+    const pct = document.getElementById('vapor-progress-pct');
+    const fill = document.getElementById('vapor-progress-fill');
+
+    if (progress && progress.status === 'downloading') {
+      container.style.display = 'block';
+      msg.innerText = progress.message;
+      pct.innerText = progress.percent + '%';
+      fill.style.width = progress.percent + '%';
+    } else if (progress && progress.status === 'completed') {
+      container.style.display = 'block';
+      msg.innerText = progress.message;
+      pct.innerText = '100%';
+      fill.style.width = '100%';
+      setTimeout(() => {
+        container.style.display = 'none';
+        vaporCheckStatus();
+      }, 4000);
     }
   } catch (e) {}
 }
@@ -84,6 +123,7 @@ async function vaporDownloadModel() {
       const res = await fetch('/v1/system/download_model', {method: 'POST'});
       const data = await res.json();
       alert(data.message);
+      vaporPollProgress();
     } catch (e) { alert('Download failed to start: ' + e); }
   }
 }
@@ -91,6 +131,7 @@ async function vaporDownloadModel() {
 window.addEventListener('DOMContentLoaded', () => {
   vaporCheckStatus();
   setInterval(vaporCheckStatus, 5000);
+  setInterval(vaporPollProgress, 800);
 });
 </script>
 """
@@ -187,11 +228,14 @@ def fix_index_html(html_path):
     
     if "vapor-model-bar" not in content:
         content = content.replace("<body>", "<body>\n" + MODEL_DETECTION_UI_HTML)
+    else:
+        # Update existing vapor-model-bar html
+        content = re.sub(r"<!-- VaporRAM Model Detection & Connection Bar -->.*?</script>", MODEL_DETECTION_UI_HTML, content, flags=re.DOTALL)
 
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    print(" -> HTML Title & Model Detection UI Injected ✓")
+    print(" -> HTML Title & Model Progress Bar UI Updated ✓")
 
 def run():
     print("=== VaporRAM Web UI Transformer ===")
