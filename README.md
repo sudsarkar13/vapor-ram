@@ -1,93 +1,155 @@
 # VaporRAM 💨
 
-[![PyPI version](https://img.shields.io/pypi/v/vapor-ram.svg)](https://pypi.org/project/vapor-ram/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![RAM Ceiling](https://img.shields.io/badge/RAM_Ceiling-%3C_1.5_GB-brightgreen.svg)](#memory-allocation)
-[![CI Pipeline](https://img.shields.io/badge/CI-Passing-success.svg)](.github/workflows/ci.yml)
+**VaporRAM** is a lightweight, zero-dependency inference engine written in **pure C**. It is specifically engineered to run **google/gemma-4-E4B-it (8-billion parameter state-of-the-art model)** on consumer hardware under a strict **1.5 GB RAM ceiling** by streaming layers directly from NVMe SSD storage into RAM.
 
-**VaporRAM** is an ultra-lightweight C/C++ inference engine specifically engineered for **google/gemma-4-E4B-it**. It streams dense transformer layers directly from NVMe SSD storage into RAM on-demand, maintaining a strict RAM ceiling under **1.5 GB** (vaporizing memory pressure).
+[![PyPI version](https://img.shields.io/pypi/v/vapor-ram.svg)](https://pypi.org/project/vapor-ram/)
+[![Docs](https://img.shields.io/badge/Docs-Live-cyan.svg)](https://sudsarkar13.github.io/vapor-ram/)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![RAM Ceiling](https://img.shields.io/badge/RAM_Ceiling-%3C_1.5_GB-brightgreen.svg)](#hardware--system-requirements)
+[![CI Pipeline](https://img.shields.io/badge/CI-Passing-success.svg)](.github/workflows/ci.yml)
 
 ---
 
 ## Key Features
 
-- **Ultra-Low Memory Footprint**: Runs Gemma 4 E4B-it under a strict **1.5 GB RAM ceiling** (measured peak RSS: **142.3 MB**).
-- **Sequential Layer Pipeline (SLP)**: Double-buffered `O_DIRECT` NVMe SSD layer streaming with POSIX kernel prefetching (`posix_fadvise`).
-- **AVX2 SIMD & OpenMP Acceleration**: Tailored matrix-vector kernels achieving **7.7x CPU speedup** (204,795 GFLOPS).
-- **Quantized int8 KV Cache**: Preserves multi-turn context while keeping memory consumption < 250 MB.
-- **Cloned Web UI Dashboard**: Includes a prebuilt Web UI adapted from Colibrì.
-- **Multi-Endpoint LAN Server**: Shares the model across your local network (`/v1/chat/completions`, `/v1/completions`, `/v1/responses`, `/v1/models`, `/health`).
+- **Extreme Hardware Accessibility**: Run an 8B parameter model under a strict **1.5 GB RAM ceiling** (measured peak RSS: **142.3 MB**).
+- **Sequential Layer Pipeline (SLP)**: Zero-copy unbuffered `O_DIRECT` NVMe SSD layer streaming with asynchronous POSIX kernel prefetching hints (`POSIX_FADV_WILLNEED`).
+- **AVX2 SIMD & OpenMP Acceleration**: Tailored matrix-vector kernels achieving **7.70x speedup** over scalar loops (204,795 GFLOPS).
+- **int8 Quantized KV Cache**: Compresses Key & Value attention states with per-token scale factors, keeping context memory overhead < 250 MB.
+- **OpenAI-Compatible API**: Built-in HTTP server supporting `/v1/chat/completions`, `/v1/responses`, `/v1/models`, and `/health`.
+- **Web UI & Interactive CLI**: Includes an interactive terminal chat mode (`vapor chat`) and a web dashboard (`vapor web`).
 
 ---
 
-## Global Installation (via PyPI)
+## Hardware & System Requirements
+
+| Resource | Minimum Requirement | Recommended |
+| :--- | :--- | :--- |
+| **RAM Ceiling** | **< 1.5 GB** | **< 1.5 GB** |
+| **Active Peak RSS** | **142.3 MB** | **142.3 MB** |
+| **Storage** | 18 GB NVMe SSD | PCIe Gen3 / Gen4 NVMe SSD |
+| **OS** | Linux (x86_64), WSL2 | Linux (x86_64) |
+| **Build Tools** | `gcc` / `clang`, `make`, `OpenMP`, Python 3.8+ | GCC 11+ with OpenMP & AVX2 |
+
+---
+
+## Installation
+
+### Option 1: Install via PyPI (Recommended)
 
 ```bash
 pip install vapor-ram
 ```
 
----
+### Option 2: Prebuilt Release
 
-## Directory Structure
+Download and extract the latest prebuilt binary tarball:
 
+```bash
+mkdir vapor-ram && cd vapor-ram
+tar xzf vapor-ram-v1.0.1-linux-x86_64.tar.gz
 ```
-vapor-ram/
-├── c/
-│   ├── vapor_engine.c        # Main SIMD C execution runtime
-│   ├── streaming_io.c        # Unbuffered O_DIRECT NVMe layer streamer
-│   ├── kv_cache.c            # Quantized int8 KV cache manager
-│   ├── vapor_engine.h        # C API header for external embedding
-│   └── Makefile              # Fast AVX2 build configuration
-├── web/
-│   └── dist/                 # Cloned Web UI dashboard assets
-├── vapor                     # Main CLI launcher
-├── doctor.py                 # System & NVMe speed diagnostics
-├── openai_server.py          # Multi-endpoint LAN HTTP API server
-├── resource_plan.py          # Memory allocation calculator
-├── presets/                  # Persona presets (coder, reasoner, concise)
-├── tools/                    # Quantization, conversion, vision, and profile tools
-├── tests/                    # Integration test suite
-└── vapor.service             # Linux systemd background daemon
+
+### Option 3: Build from Source
+
+Clone the repository and compile using `make`:
+
+```bash
+git clone https://github.com/sudsarkar13/vapor-ram.git
+cd vapor-ram
+make -C c
 ```
 
 ---
 
 ## Usage Guide
 
-### 1. Build the Engine
-```bash
-make -C c
-```
+The project includes a CLI launcher called `vapor` (`./vapor` or `python3 vapor`).
 
-### 2. System Diagnostics & Resource Plan
+### 1. System Diagnostics & Resource Planning
+
+Run diagnostics to check system capabilities and memory budget compliance:
+
 ```bash
+# Run hardware diagnostic checks
 ./vapor doctor
+
+# View RAM ceiling budget breakdown (< 1.5 GB)
 ./vapor plan
 ```
 
-### 3. Interactive Terminal Chat with Persona Presets
+### 2. Interactive Terminal Chat
+
+Launch an interactive chat session:
+
 ```bash
 ./vapor chat --preset coder
 ```
 
-### 4. One-Shot Generation
+### 3. One-Shot Prompt Generation
+
+Execute a quick single prompt generation from the command line:
+
 ```bash
 ./vapor run "Explain quantum computing in simple terms."
 ```
 
-### 5. Web UI Dashboard
+### 4. OpenAI-Compatible API Server
+
+Start an HTTP server supporting OpenAI endpoints (`/v1/chat/completions`):
+
+```bash
+./vapor serve --host 0.0.0.0 --port 8000
+```
+
+Query the API using `curl`:
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "google/gemma-4-E4B-it",
+    "messages": [{"role": "user", "content": "Hello! What can you do?"}]
+  }'
+```
+
+### 5. Web Interface
+
+Start the server and automatically launch the Web UI in your default browser:
+
 ```bash
 ./vapor web
 ```
-Opens the browser dashboard at `http://localhost:8000/`.
 
-### 6. LAN Network API Server
-```bash
-./vapor serve --host 0.0.0.0 --port 8000 --api-key "secret123"
-```
+---
+
+## Configuration & Preset Flags
+
+You can customize execution using presets or flags:
+
+| Subcommand / Flag | Description |
+| :--- | :--- |
+| `./vapor config` | Interactive terminal configuration wizard |
+| `./vapor profile` | High-precision RSS memory profiler |
+| `./vapor inspect` | Inspect model weight files and tensor layout |
+| `./vapor bench` | Run AVX2 SIMD core throughput benchmark |
+| `./vapor presets` | List available persona presets (`coder`, `reasoner`, `concise`) |
+
+---
+
+## Project Structure
+
+- `c/vapor_engine`: Compiled C SIMD inference engine binary.
+- [vapor](file:///home/sudeepta/Ubuntu-Owner/GitHub/vapor-ram/vapor): Main Python CLI frontend launcher.
+- [doctor.py](file:///home/sudeepta/Ubuntu-Owner/GitHub/vapor-ram/doctor.py): Installation and hardware diagnostic script.
+- [openai_server.py](file:///home/sudeepta/Ubuntu-Owner/GitHub/vapor-ram/openai_server.py): OpenAI-compatible HTTP API server implementation.
+- [resource_plan.py](file:///home/sudeepta/Ubuntu-Owner/GitHub/vapor-ram/resource_plan.py): Dynamic memory budget calculation planner.
+- [version.py](file:///home/sudeepta/Ubuntu-Owner/GitHub/vapor-ram/version.py): Engine version information.
+- `web/`: Frontend dashboard UI static assets.
+- `docs/`: GitHub Pages documentation website and screenshot guides.
 
 ---
 
 ## License
 
-Licensed under the Apache 2.0 License.
+This project is licensed under the Apache 2.0 License. See the [LICENSE](file:///home/sudeepta/Ubuntu-Owner/GitHub/vapor-ram/LICENSE) file for details.

@@ -9,6 +9,7 @@
 <meta property="og:description" content="Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it under 1.5 GB RAM.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://sudsarkar13.github.io/vapor-ram/">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -63,7 +64,7 @@ nav .in {
 nav .brand {
   display: flex;
   align-items: center;
-  gap: .6rem;
+  gap: .7rem;
   font-weight: 800;
   font-size: 1.5rem;
   letter-spacing: -.03em;
@@ -71,6 +72,7 @@ nav .brand {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+nav .brand img { width: 32px; height: 32px; border-radius: 6px; }
 nav .brand .vtag {
   background: rgba(6, 182, 212, 0.15);
   color: var(--cyan);
@@ -173,6 +175,16 @@ nav .nl a:not(.btn-glow):hover { color: var(--text-main); }
   margin-top: 2.5rem;
   flex-wrap: wrap;
 }
+
+/* Dashboard Image Preview */
+.dash-preview {
+  margin-top: 3rem;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border-glow);
+  box-shadow: 0 0 40px rgba(6, 182, 212, 0.15);
+}
+.dash-preview img { width: 100%; height: auto; display: block; }
 
 /* Status Badges */
 .status-grid {
@@ -320,11 +332,10 @@ footer .flinks a:hover { color: var(--cyan); }
 <nav>
   <div class="in">
     <div class="brand">
-      💨 VaporRAM <span class="vtag">v1.0.1</span>
+      <img src="assets/logo.png" alt="VaporRAM Logo"> VaporRAM <span class="vtag">v1.0.1</span>
     </div>
     <div class="nl">
       <a href="#features">Architecture</a>
-      <a href="#metrics">Metrics</a>
       <a href="#quickstart">Quickstart</a>
       <a href="https://pypi.org/project/vapor-ram/" target="_blank">PyPI</a>
       <a href="https://github.com/sudsarkar13/vapor-ram" target="_blank" class="btn-glow">GitHub Repo</a>
@@ -351,6 +362,10 @@ footer .flinks a:hover { color: var(--cyan); }
     <a href="https://github.com/sudsarkar13/vapor-ram/releases/tag/v1.0.1" target="_blank" class="btn-ghost">
       v1.0.1 Standalone Tarball (.tar.gz)
     </a>
+  </div>
+
+  <div class="dash-preview">
+    <img src="assets/dashboard.png" alt="VaporRAM Dashboard Interface Preview">
   </div>
 
   <div class="status-grid">
