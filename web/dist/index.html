@@ -12,6 +12,10 @@
   <body>
 
 
+
+
+
+
 <!-- VaporRAM Model Detection & Connection Bar -->
 <div id="vapor-model-bar" style="background:#071018;border-bottom:1px solid rgba(6,182,212,0.2);padding:0.75rem 1.2rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#f9fafb;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.8rem;z-index:999;">
   <div style="display:flex;align-items:center;gap:0.8rem;flex-wrap:wrap;">
@@ -22,9 +26,9 @@
 
   <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
     <input id="model-path-input" type="text" value="./models/gemma-4-E4B-it" placeholder="Locate system model path..." style="background:#0d1825;color:#f9fafb;border:1px solid rgba(255,255,255,0.15);padding:0.35rem 0.7rem;border-radius:6px;font-size:0.8rem;width:240px;" />
-    <button onclick="vaporSetModelPath()" style="background:#06b6d4;color:#000;border:none;padding:0.38rem 0.75rem;border-radius:6px;font-size:0.8rem;font-weight:600;cursor:pointer;">Locate & Load</button>
-    <button onclick="vaporScanModels()" style="background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:0.38rem 0.75rem;border-radius:6px;font-size:0.8rem;cursor:pointer;">Scan System</button>
-    <button onclick="vaporDownloadModel()" style="background:linear-gradient(135deg,#06b6d4,#6366f1);color:#fff;border:none;padding:0.38rem 0.85rem;border-radius:6px;font-size:0.8rem;font-weight:600;cursor:pointer;">Download Weights</button>
+    <button id="btn-set-path" onclick="window.vaporSetModelPath()" style="background:#06b6d4;color:#000;border:none;padding:0.38rem 0.75rem;border-radius:6px;font-size:0.8rem;font-weight:600;cursor:pointer;">Locate & Load</button>
+    <button id="btn-scan" onclick="window.vaporScanModels()" style="background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:0.38rem 0.75rem;border-radius:6px;font-size:0.8rem;cursor:pointer;">Scan System</button>
+    <button id="btn-download" onclick="window.vaporDownloadModel()" style="background:linear-gradient(135deg,#06b6d4,#6366f1);color:#fff;border:none;padding:0.38rem 0.85rem;border-radius:6px;font-size:0.8rem;font-weight:600;cursor:pointer;">Download Weights</button>
   </div>
 </div>
 
@@ -40,7 +44,7 @@
 </div>
 
 <script>
-async function vaporCheckStatus() {
+window.vaporCheckStatus = async function() {
   try {
     const res = await fetch('/v1/health');
     const data = await res.json();
@@ -48,22 +52,26 @@ async function vaporCheckStatus() {
     const connBadge = document.getElementById('model-conn-badge');
     const pathInput = document.getElementById('model-path-input');
 
-    if (data.model_path) pathInput.value = data.model_path;
+    if (data.model_path && pathInput) pathInput.value = data.model_path;
     if (data.model_available) {
-      statusBadge.style.background = 'rgba(16,185,129,0.15)';
-      statusBadge.style.color = '#10b981';
-      statusBadge.innerText = '● Weights Loaded (google/gemma-4-E4B-it)';
-      connBadge.innerText = 'NVMe O_DIRECT Streaming (RAM Ceiling < 1.5 GB)';
+      if (statusBadge) {
+        statusBadge.style.background = 'rgba(16,185,129,0.15)';
+        statusBadge.style.color = '#10b981';
+        statusBadge.innerText = '● Weights Loaded (google/gemma-4-E4B-it)';
+      }
+      if (connBadge) connBadge.innerText = 'NVMe O_DIRECT Streaming (RAM Ceiling < 1.5 GB)';
     } else {
-      statusBadge.style.background = 'rgba(245,158,11,0.15)';
-      statusBadge.style.color = '#f59e0b';
-      statusBadge.innerText = '⚠️ Weights Required (Click Download Weights)';
-      connBadge.innerText = 'Simulation Mode (< 1.5 GB RAM)';
+      if (statusBadge) {
+        statusBadge.style.background = 'rgba(245,158,11,0.15)';
+        statusBadge.style.color = '#f59e0b';
+        statusBadge.innerText = '⚠️ Weights Required (Click Download Weights)';
+      }
+      if (connBadge) connBadge.innerText = 'Simulation Mode (< 1.5 GB RAM)';
     }
   } catch (e) {}
-}
+};
 
-async function vaporPollProgress() {
+window.vaporPollProgress = async function() {
   try {
     const res = await fetch('/v1/system/progress');
     const data = await res.json();
@@ -74,25 +82,26 @@ async function vaporPollProgress() {
     const fill = document.getElementById('vapor-progress-fill');
 
     if (progress && progress.status === 'downloading') {
-      container.style.display = 'block';
-      msg.innerText = progress.message;
-      pct.innerText = progress.percent + '%';
-      fill.style.width = progress.percent + '%';
+      if (container) container.style.display = 'block';
+      if (msg) msg.innerText = progress.message;
+      if (pct) pct.innerText = progress.percent + '%';
+      if (fill) fill.style.width = progress.percent + '%';
     } else if (progress && progress.status === 'completed') {
-      container.style.display = 'block';
-      msg.innerText = progress.message;
-      pct.innerText = '100%';
-      fill.style.width = '100%';
+      if (container) container.style.display = 'block';
+      if (msg) msg.innerText = progress.message;
+      if (pct) pct.innerText = '100%';
+      if (fill) fill.style.width = '100%';
       setTimeout(() => {
-        container.style.display = 'none';
-        vaporCheckStatus();
+        if (container) container.style.display = 'none';
+        window.vaporCheckStatus();
       }, 4000);
     }
   } catch (e) {}
-}
+};
 
-async function vaporSetModelPath() {
-  const path = document.getElementById('model-path-input').value;
+window.vaporSetModelPath = async function() {
+  const inputEl = document.getElementById('model-path-input');
+  const path = inputEl ? inputEl.value : '';
   try {
     const res = await fetch('/v1/system/set_model_path', {
       method: 'POST',
@@ -103,43 +112,46 @@ async function vaporSetModelPath() {
     if (data.error) alert(data.error);
     else {
       alert(data.message);
-      vaporCheckStatus();
+      window.vaporCheckStatus();
     }
   } catch (e) { alert('Failed to update model path: ' + e); }
-}
+};
 
-async function vaporScanModels() {
+window.vaporScanModels = async function() {
   try {
     const res = await fetch('/v1/system/scan');
     const data = await res.json();
-    let msg = 'System Model Scan Results:
-
-';
-    data.scanned_models.forEach(m => {
-      msg += `- ${m.path} : ${m.available ? 'AVAILABLE' : 'Not Found'}
-`;
-    });
+    let msg = "System Model Scan Results:\n\n";
+    if (data.scanned_models) {
+      data.scanned_models.forEach(function(m) {
+        msg += "- " + m.path + " : " + (m.available ? "AVAILABLE" : "Not Found") + "\n";
+      });
+    }
     alert(msg);
   } catch (e) { alert('Failed to scan system: ' + e); }
-}
+};
 
-async function vaporDownloadModel() {
+window.vaporDownloadModel = async function() {
   if (confirm('Start downloading google/gemma-4-E4B-it model weights from Hugging Face?')) {
     try {
       const res = await fetch('/v1/system/download_model', {method: 'POST'});
       const data = await res.json();
       alert(data.message);
-      vaporPollProgress();
+      window.vaporPollProgress();
     } catch (e) { alert('Download failed to start: ' + e); }
   }
-}
+};
 
 window.addEventListener('DOMContentLoaded', () => {
-  vaporCheckStatus();
-  setInterval(vaporCheckStatus, 5000);
-  setInterval(vaporPollProgress, 800);
+  window.vaporCheckStatus();
+  setInterval(window.vaporCheckStatus, 5000);
+  setInterval(window.vaporPollProgress, 800);
 });
 </script>
+
+
+
+
 
 
     <div id="root"></div>
