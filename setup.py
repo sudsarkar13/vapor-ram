@@ -15,7 +15,7 @@ setup(
     description="Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it (< 1.5 GB RAM)",
     long_description=open("README.md").read() if os.path.exists("README.md") else "",
     long_description_content_type="text/markdown",
-    author="VaporRAM Team",
+    author="sudsarkar13",
     license="Apache-2.0",
     packages=find_packages(),
     py_modules=["doctor", "resource_plan", "openai_server", "config"],

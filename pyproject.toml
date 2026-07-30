@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it (< 1.5 GB RAM)"
 readme = "README.md"
 authors = [
-    { name = "VaporRAM Team" }
+    { name = "sudsarkar13" }
 ]
 license = "Apache-2.0"
 classifiers = [
@@ -24,4 +24,4 @@ dependencies = [
 vapor = "vapor:main"
 
 [project.urls]
-Homepage = "https://github.com/Ubuntu-Owner/vapor-ram"
+Homepage = "https://github.com/sudsarkar13/vapor-ram"
