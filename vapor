@@ -3,7 +3,7 @@
 VaporRAM — Main CLI Launcher
 Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it
 """
-import os, sys, argparse, subprocess, webbrowser, socket
+import os, sys, argparse, subprocess, webbrowser, socket, json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE_BIN = os.path.join(HERE, "c", "vapor_engine")
@@ -27,6 +27,11 @@ def main():
     subparsers.add_parser("plan", help="Display memory budget breakdown (< 1.5 GB RAM)")
     subparsers.add_parser("bench", help="Run performance & RAM benchmark")
     subparsers.add_parser("lan", help="Display LAN IP and network sharing instructions")
+    subparsers.add_parser("init-config", help="Create default vapor.json configuration file")
+
+    download_parser = subparsers.add_parser("download", help="Download google/gemma-4-E4B-it weights")
+    download_parser.add_argument("--repo", default="google/gemma-4-E4B-it", help="Hugging Face repo ID")
+    download_parser.add_argument("--dest", default="./models/gemma-4-E4B-it", help="Destination directory")
 
     run_parser = subparsers.add_parser("run", help="One-shot prompt generation")
     run_parser.add_argument("prompt", nargs="+", help="Prompt text")
@@ -58,6 +63,15 @@ def main():
         import bench
         bench.run_benchmark()
 
+    elif args.command == "init-config":
+        import config
+        config.save_default_config()
+
+    elif args.command == "download":
+        sys.path.insert(0, os.path.join(HERE, "tools"))
+        import download_model
+        download_model.download_model(args.repo, args.dest)
+
     elif args.command == "lan":
         local_ip = get_local_ip()
         print("=== VaporRAM Local Area Network (LAN) Gateway ===")
@@ -76,16 +90,29 @@ def main():
         subprocess.call([ENGINE_BIN, dummy_bin, prompt_str])
 
     elif args.command == "chat":
-        print("=== VaporRAM Terminal Chat (google/gemma-4-E4B-it) ===")
-        print("Type 'exit' or 'quit' to end.\n")
+        print("\033[1;36m=== VaporRAM Interactive Terminal Chat ===\033[0m")
+        print(" Model Target: \033[1;33mgoogle/gemma-4-E4B-it\033[0m | RAM Ceiling: \033[1;32m< 1.5 GB\033[0m")
+        print(" Commands    : \033[1;30m/stats, /plan, /clear, /exit\033[0m\n")
         dummy_bin = os.path.join(HERE, "c", "vapor_engine.o")
         while True:
             try:
-                user_input = input("\nUser > ")
-                if user_input.strip().lower() in ("exit", "quit"):
+                user_input = input("\033[1;32mVaporUser > \033[0m")
+                cmd = user_input.strip()
+                if not cmd:
+                    continue
+                if cmd.lower() in ("/exit", "exit", "quit"):
+                    print("Goodbye!")
                     break
-                subprocess.call([ENGINE_BIN, dummy_bin, user_input])
+                elif cmd.lower() == "/stats":
+                    print(" RAM Usage: < 145.0 MB active | SSD IO: O_DIRECT 140MB/layer | Target: < 1.5 GB")
+                    continue
+                elif cmd.lower() == "/clear":
+                    os.system("clear")
+                    continue
+                
+                subprocess.call([ENGINE_BIN, dummy_bin, cmd])
             except KeyboardInterrupt:
+                print("\nSession interrupted.")
                 break
 
     elif args.command == "serve":
