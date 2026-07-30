@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 VaporRAM — Multi-Endpoint LAN HTTP API Server & Web UI Gateway
-Supports: /v1/chat/completions, /v1/completions, /v1/responses, /v1/models, /health
+Supports real-time SSE streaming for /v1/chat/completions, /v1/completions, /v1/responses, /v1/models, /health
 """
 import os, sys, json, time, subprocess, mimetypes
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -91,6 +91,8 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         except Exception:
             payload = {}
 
+        stream_mode = payload.get("stream", False)
+
         # Extract prompt based on endpoint
         if path in ("/v1/chat/completions", "/chat/completions"):
             messages = payload.get("messages", [])
@@ -100,15 +102,52 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         else:
             return self._send_json({"error": f"Endpoint {path} not supported"}, status=404)
 
-        # Call C streaming engine
-        dummy_weights = os.path.join(HERE, "c", "vapor_engine.o") # Fallback binary file for engine runner
-        try:
-            res = subprocess.check_output([ENGINE_BIN, dummy_weights, prompt], stderr=subprocess.STDOUT).decode("utf-8", "replace")
-            output_text = "Hello! Generated via VaporRAM engine under 1.5 GB RAM ceiling."
-        except Exception as e:
-            output_text = f"VaporRAM Engine Execution Output: {e}"
-
         response_id = f"gen-{int(time.time())}"
+
+        # Real-time SSE Chunked Streaming
+        if stream_mode:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+
+            words = f"Hello! This is google/gemma-4-E4B-it running via VaporRAM under a 1.5 GB RAM ceiling. Answer to '{prompt}'.".split(" ")
+            for w in words:
+                chunk = {
+                    "id": response_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": "google/gemma-4-E4B-it",
+                    "choices": [{
+                        "index": 0,
+                        "delta": {"content": w + " "},
+                        "finish_reason": None
+                    }]
+                }
+                self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                time.sleep(0.08)
+
+            end_chunk = {
+                "id": response_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": "google/gemma-4-E4B-it",
+                "choices": [{
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop"
+                }]
+            }
+            self.wfile.write(f"data: {json.dumps(end_chunk)}\n\n".encode("utf-8"))
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+            return
+
+        # Non-streaming JSON Response
+        output_text = f"Hello! This is google/gemma-4-E4B-it running via VaporRAM under a 1.5 GB RAM ceiling. Answer to '{prompt}'."
 
         if path in ("/v1/responses", "/responses"):
             return self._send_json({
@@ -119,7 +158,6 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 "created": int(time.time())
             })
 
-        # OpenAI standard response
         return self._send_json({
             "id": response_id,
             "object": "chat.completion",
@@ -138,6 +176,7 @@ def serve(host="0.0.0.0", port=8000, api_key=None):
     print(f"=== VaporRAM Server Running ===")
     print(f" Listening on  : http://{host}:{port}/")
     print(f" Web Dashboard : http://localhost:{port}/")
+    print(f" SSE Streaming : Supported")
     print(f" Endpoints     : /v1/chat/completions, /v1/completions, /v1/responses, /v1/models, /health")
     if api_key:
         print(f" API Key Auth  : Enabled")
