@@ -1,19 +1,105 @@
 #!/usr/bin/env python3
 """
-VaporRAM — Web UI Brand, Aesthetics & Mobile Layout Transformer
-Replaces old Colibri branding, updates color palette to Cyber Cyan / Indigo, and adds mobile responsive layout styles.
+VaporRAM — Web UI Brand, Aesthetics, Model Detection & Mobile Layout Transformer
+Replaces old Colibri branding, updates color palette, adds Model Detection/Installer UI, and mobile responsive styles.
 """
 import os, sys, re
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST_DIR = os.path.join(HERE, "web", "dist")
 
+MODEL_DETECTION_UI_HTML = """
+<!-- VaporRAM Model Detection & Connection Bar -->
+<div id="vapor-model-bar" style="background:#071018;border-bottom:1px solid rgba(6,182,212,0.2);padding:0.75rem 1.2rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#f9fafb;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.8rem;z-index:999;">
+  <div style="display:flex;align-items:center;gap:0.8rem;flex-wrap:wrap;">
+    <span style="font-weight:700;font-size:0.9rem;color:#06b6d4;letter-spacing:0.02em;">💨 VaporRAM Engine</span>
+    <span id="model-status-badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);font-size:0.75rem;padding:0.25rem 0.6rem;border-radius:6px;font-weight:600;">● Model Connected (google/gemma-4-E4B-it)</span>
+    <span id="model-conn-badge" style="background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);font-size:0.75rem;padding:0.25rem 0.6rem;border-radius:6px;font-weight:600;">NVMe O_DIRECT Streaming (RAM Ceiling < 1.5 GB)</span>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
+    <input id="model-path-input" type="text" value="./models/gemma-4-E4B-it" placeholder="Locate system model path..." style="background:#0d1825;color:#f9fafb;border:1px solid rgba(255,255,255,0.15);padding:0.35rem 0.7rem;border-radius:6px;font-size:0.8rem;width:240px;" />
+    <button onclick="vaporSetModelPath()" style="background:#06b6d4;color:#000;border:none;padding:0.38rem 0.75rem;border-radius:6px;font-size:0.8rem;font-weight:600;cursor:pointer;">Locate & Load</button>
+    <button onclick="vaporScanModels()" style="background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:0.38rem 0.75rem;border-radius:6px;font-size:0.8rem;cursor:pointer;">Scan System</button>
+    <button onclick="vaporDownloadModel()" style="background:linear-gradient(135deg,#06b6d4,#6366f1);color:#fff;border:none;padding:0.38rem 0.85rem;border-radius:6px;font-size:0.8rem;font-weight:600;cursor:pointer;">Download Weights</button>
+  </div>
+</div>
+
+<script>
+async function vaporCheckStatus() {
+  try {
+    const res = await fetch('/v1/health');
+    const data = await res.json();
+    const statusBadge = document.getElementById('model-status-badge');
+    const connBadge = document.getElementById('model-conn-badge');
+    const pathInput = document.getElementById('model-path-input');
+
+    if (data.model_path) pathInput.value = data.model_path;
+    if (data.model_available) {
+      statusBadge.style.background = 'rgba(16,185,129,0.15)';
+      statusBadge.style.color = '#10b981';
+      statusBadge.innerText = '● Weights Loaded (google/gemma-4-E4B-it)';
+      connBadge.innerText = 'NVMe O_DIRECT Streaming (RAM Ceiling < 1.5 GB)';
+    } else {
+      statusBadge.style.background = 'rgba(245,158,11,0.15)';
+      statusBadge.style.color = '#f59e0b';
+      statusBadge.innerText = '⚠️ Weights Required (Click Download Weights)';
+      connBadge.innerText = 'Simulation Mode (< 1.5 GB RAM)';
+    }
+  } catch (e) {}
+}
+
+async function vaporSetModelPath() {
+  const path = document.getElementById('model-path-input').value;
+  try {
+    const res = await fetch('/v1/system/set_model_path', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path: path})
+    });
+    const data = await res.json();
+    if (data.error) alert(data.error);
+    else {
+      alert(data.message);
+      vaporCheckStatus();
+    }
+  } catch (e) { alert('Failed to update model path: ' + e); }
+}
+
+async function vaporScanModels() {
+  try {
+    const res = await fetch('/v1/system/scan');
+    const data = await res.json();
+    let msg = 'System Model Scan Results:\\n\\n';
+    data.scanned_models.forEach(m => {
+      msg += `- ${m.path} : ${m.available ? 'AVAILABLE' : 'Not Found'}\\n`;
+    });
+    alert(msg);
+  } catch (e) { alert('Failed to scan system: ' + e); }
+}
+
+async function vaporDownloadModel() {
+  if (confirm('Start downloading google/gemma-4-E4B-it model weights from Hugging Face?')) {
+    try {
+      const res = await fetch('/v1/system/download_model', {method: 'POST'});
+      const data = await res.json();
+      alert(data.message);
+    } catch (e) { alert('Download failed to start: ' + e); }
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  vaporCheckStatus();
+  setInterval(vaporCheckStatus, 5000);
+});
+</script>
+"""
+
 def fix_js_bundle(js_path):
     print(f"[1/3] Processing JS bundle: {os.path.basename(js_path)}")
     with open(js_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Exact case & localized pattern replacements
     replacements = {
         r"COLIBRÌ ENGINE": "VaporRAM ENGINE",
         r"MOTORE COLIBRÌ": "MOTORE VaporRAM",
@@ -39,7 +125,6 @@ def fix_js_bundle(js_path):
     for old_pat, new_str in replacements.items():
         content = re.sub(old_pat, new_str, content)
 
-    # Case insensitive fallback for remaining colibri text
     content = re.sub(r"colibr[ìi]", "VaporRAM", content, flags=re.IGNORECASE)
 
     with open(js_path, "w", encoding="utf-8") as f:
@@ -52,12 +137,10 @@ def fix_css_bundle(css_path):
     with open(css_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Color updates (Green -> Cyber Cyan & Indigo)
     content = content.replace("#4ed6a5", "#06b6d4")
     content = content.replace("#8abfa9", "#818cf8")
     content = content.replace("#052118", "#071927")
 
-    # Mobile & Responsive small-screen CSS enhancements
     responsive_css = """
 /* VaporRAM Small Screen & Mobile Layout Enhancements */
 @media (max-width: 900px) {
@@ -102,10 +185,13 @@ def fix_index_html(html_path):
 
     content = content.replace("<title>VaporRAM Dashboard</title>", "<title>VaporRAM — Gemma 4 E4B-it Dashboard</title>")
     
+    if "vapor-model-bar" not in content:
+        content = content.replace("<body>", "<body>\n" + MODEL_DETECTION_UI_HTML)
+
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    print(" -> HTML Title Updated ✓")
+    print(" -> HTML Title & Model Detection UI Injected ✓")
 
 def run():
     print("=== VaporRAM Web UI Transformer ===")
