@@ -4,16 +4,20 @@ LDFLAGS = -lm -fopenmp
 
 TARGET = vapor_engine
 OBJS = vapor_engine.o streaming_io.o kv_cache.o
+TOOLS = simd_bench
 
-all: $(TARGET)
+all: $(TARGET) $(TOOLS)
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDFLAGS)
+
+simd_bench: ../tools/simd_bench.c
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJS) $(TARGET) $(TOOLS)
 
 .PHONY: all clean
