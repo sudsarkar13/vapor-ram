@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  vapor-ram:
+    build: .
+    container_name: vapor-ram-server
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models
+    mem_limit: 1.5g
+    environment:
+      - COLI_NO_OMP_TUNE=1

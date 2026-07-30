@@ -1,0 +1,15 @@
+[Unit]
+Description=VaporRAM Ultra-Low RAM AI Server (gemma-4-E4B-it)
+After=network.target
+
+[Service]
+Type=simple
+User=sudeepta
+WorkingDirectory=/home/sudeepta/Ubuntu-Owner/GitHub/vapor-ram
+ExecStart=/usr/bin/python3 /home/sudeepta/Ubuntu-Owner/GitHub/vapor-ram/openai_server.py
+Restart=always
+RestartSec=3
+MemoryMax=1.5G
+
+[Install]
+WantedBy=multi-user.target

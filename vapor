@@ -7,6 +7,7 @@ import os, sys, argparse, subprocess, webbrowser, socket, json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE_BIN = os.path.join(HERE, "c", "vapor_engine")
+PRESETS_DIR = os.path.join(HERE, "presets")
 
 def get_local_ip():
     try:
@@ -18,6 +19,19 @@ def get_local_ip():
     except Exception:
         return "127.0.0.1"
 
+def list_presets():
+    print("=== VaporRAM Persona Presets ===")
+    if os.path.exists(PRESETS_DIR):
+        for f in sorted(os.listdir(PRESETS_DIR)):
+            if f.endswith(".json"):
+                p_path = os.path.join(PRESETS_DIR, f)
+                try:
+                    data = json.load(open(p_path))
+                    print(f"  - {f[:-5]:<10} : {data.get('name', 'Preset')} (temp={data.get('temperature', 0.2)})")
+                except Exception:
+                    pass
+    print()
+
 def main():
     parser = argparse.ArgumentParser(description="VaporRAM — Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it")
     subparsers = parser.add_subparsers(dest="command")
@@ -27,6 +41,7 @@ def main():
     subparsers.add_parser("plan", help="Display memory budget breakdown (< 1.5 GB RAM)")
     subparsers.add_parser("bench", help="Run performance & RAM benchmark")
     subparsers.add_parser("lan", help="Display LAN IP and network sharing instructions")
+    subparsers.add_parser("presets", help="List available persona presets")
     subparsers.add_parser("init-config", help="Create default vapor.json configuration file")
 
     download_parser = subparsers.add_parser("download", help="Download google/gemma-4-E4B-it weights")
@@ -35,8 +50,10 @@ def main():
 
     run_parser = subparsers.add_parser("run", help="One-shot prompt generation")
     run_parser.add_argument("prompt", nargs="+", help="Prompt text")
+    run_parser.add_argument("--preset", default=None, help="Preset name (e.g. coder, reasoner, concise)")
 
-    subparsers.add_parser("chat", help="Interactive terminal chat session")
+    chat_parser = subparsers.add_parser("chat", help="Interactive terminal chat session")
+    chat_parser.add_argument("--preset", default=None, help="Preset name (e.g. coder, reasoner, concise)")
 
     serve_parser = subparsers.add_parser("serve", help="Host LAN HTTP API server")
     serve_parser.add_argument("--host", default="0.0.0.0", help="Host address (default: 0.0.0.0)")
@@ -63,6 +80,9 @@ def main():
         import bench
         bench.run_benchmark()
 
+    elif args.command == "presets":
+        list_presets()
+
     elif args.command == "init-config":
         import config
         config.save_default_config()
@@ -86,13 +106,19 @@ def main():
 
     elif args.command == "run":
         prompt_str = " ".join(args.prompt)
+        if args.preset:
+            p_file = os.path.join(PRESETS_DIR, f"{args.preset}.json")
+            if os.path.exists(p_file):
+                p_data = json.load(open(p_file))
+                prompt_str = f"{p_data.get('system_instruction', '')}\nUser: {prompt_str}"
         dummy_bin = os.path.join(HERE, "c", "vapor_engine.o")
         subprocess.call([ENGINE_BIN, dummy_bin, prompt_str])
 
     elif args.command == "chat":
         print("\033[1;36m=== VaporRAM Interactive Terminal Chat ===\033[0m")
-        print(" Model Target: \033[1;33mgoogle/gemma-4-E4B-it\033[0m | RAM Ceiling: \033[1;32m< 1.5 GB\033[0m")
-        print(" Commands    : \033[1;30m/stats, /plan, /clear, /exit\033[0m\n")
+        preset_name = args.preset or "default"
+        print(f" Model Target: \033[1;33mgoogle/gemma-4-E4B-it\033[0m | Preset: \033[1;35m{preset_name}\033[0m | RAM Ceiling: \033[1;32m< 1.5 GB\033[0m")
+        print(" Commands    : \033[1;30m/stats, /presets, /clear, /exit\033[0m\n")
         dummy_bin = os.path.join(HERE, "c", "vapor_engine.o")
         while True:
             try:
@@ -105,6 +131,9 @@ def main():
                     break
                 elif cmd.lower() == "/stats":
                     print(" RAM Usage: < 145.0 MB active | SSD IO: O_DIRECT 140MB/layer | Target: < 1.5 GB")
+                    continue
+                elif cmd.lower() == "/presets":
+                    list_presets()
                     continue
                 elif cmd.lower() == "/clear":
                     os.system("clear")
