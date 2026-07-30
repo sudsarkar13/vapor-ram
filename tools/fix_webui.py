@@ -37,6 +37,8 @@ MODEL_DETECTION_UI_HTML = """
 </div>
 
 <script>
+window.vaporProgressHandled = false;
+
 window.vaporCheckStatus = async function() {
   try {
     const res = await fetch('/v1/health');
@@ -75,19 +77,27 @@ window.vaporPollProgress = async function() {
     const fill = document.getElementById('vapor-progress-fill');
 
     if (progress && progress.status === 'downloading') {
+      window.vaporProgressHandled = false;
       if (container) container.style.display = 'block';
       if (msg) msg.innerText = progress.message;
       if (pct) pct.innerText = progress.percent + '%';
       if (fill) fill.style.width = progress.percent + '%';
     } else if (progress && progress.status === 'completed') {
-      if (container) container.style.display = 'block';
-      if (msg) msg.innerText = progress.message;
-      if (pct) pct.innerText = '100%';
-      if (fill) fill.style.width = '100%';
-      setTimeout(() => {
-        if (container) container.style.display = 'none';
-        window.vaporCheckStatus();
-      }, 4000);
+      if (!window.vaporProgressHandled) {
+        window.vaporProgressHandled = true;
+        if (container) container.style.display = 'block';
+        if (msg) msg.innerText = progress.message;
+        if (pct) pct.innerText = '100%';
+        if (fill) fill.style.width = '100%';
+        setTimeout(() => {
+          if (container) container.style.display = 'none';
+          window.vaporCheckStatus();
+        }, 3000);
+      }
+    } else {
+      if (window.vaporProgressHandled && container) {
+        container.style.display = 'none';
+      }
     }
   } catch (e) {}
 };
@@ -126,6 +136,7 @@ window.vaporScanModels = async function() {
 
 window.vaporDownloadModel = async function() {
   if (confirm('Start downloading google/gemma-4-E4B-it model weights from Hugging Face?')) {
+    window.vaporProgressHandled = false;
     try {
       const res = await fetch('/v1/system/download_model', {method: 'POST'});
       const data = await res.json();

@@ -9,6 +9,11 @@ DEFAULT_MODEL_DIR = os.path.join(HERE, "models", "gemma-4-E4B-it")
 
 current_model_path = DEFAULT_MODEL_DIR
 download_progress = {"status": "idle", "percent": 0, "message": "Ready"}
+completed_reset_timer = None
+
+def reset_progress_idle():
+    global download_progress
+    download_progress = {"status": "idle", "percent": 0, "message": "Ready"}
 
 def clean_path(path_str):
     p = path_str.rstrip("/")
@@ -71,7 +76,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        global current_model_path, download_progress
+        global current_model_path, download_progress, completed_reset_timer
         parsed = urlparse(self.path)
         path = clean_path(parsed.path)
 
@@ -112,12 +117,19 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
 
         # Progress polling & system scan GET endpoints
         if path.endswith("/progress") or path.endswith("/system/progress") or path.endswith("/scan") or path.endswith("/system/scan"):
+            res_prog = dict(download_progress)
+            # If status is completed or error, auto-reset to idle after 4 seconds
+            if download_progress.get("status") in ("completed", "error"):
+                if completed_reset_timer is None or not completed_reset_timer.is_alive():
+                    completed_reset_timer = threading.Timer(4.0, reset_progress_idle)
+                    completed_reset_timer.start()
+
             return self._send_json({
                 "status": "ok",
                 "message": f"Scanned {len(scan_system_for_models())} directories.",
                 "active_path": current_model_path,
                 "scanned_models": scan_system_for_models(),
-                "download_progress": download_progress
+                "download_progress": res_prog
             })
 
         # Brain Cortex & Profiling metrics endpoints
