@@ -3,10 +3,20 @@
 VaporRAM — Main CLI Launcher
 Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it
 """
-import os, sys, argparse, subprocess, webbrowser
+import os, sys, argparse, subprocess, webbrowser, socket
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE_BIN = os.path.join(HERE, "c", "vapor_engine")
+
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
 
 def main():
     parser = argparse.ArgumentParser(description="VaporRAM — Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it")
@@ -15,11 +25,13 @@ def main():
     # Commands
     subparsers.add_parser("doctor", help="Run system and hardware diagnostics")
     subparsers.add_parser("plan", help="Display memory budget breakdown (< 1.5 GB RAM)")
-    
+    subparsers.add_parser("bench", help="Run performance & RAM benchmark")
+    subparsers.add_parser("lan", help="Display LAN IP and network sharing instructions")
+
     run_parser = subparsers.add_parser("run", help="One-shot prompt generation")
     run_parser.add_argument("prompt", nargs="+", help="Prompt text")
 
-    chat_parser = subparsers.add_parser("chat", help="Interactive terminal chat session")
+    subparsers.add_parser("chat", help="Interactive terminal chat session")
 
     serve_parser = subparsers.add_parser("serve", help="Host LAN HTTP API server")
     serve_parser.add_argument("--host", default="0.0.0.0", help="Host address (default: 0.0.0.0)")
@@ -40,6 +52,23 @@ def main():
         import resource_plan
         plan = resource_plan.build_plan()
         print(resource_plan.format_plan(plan))
+
+    elif args.command == "bench":
+        sys.path.insert(0, os.path.join(HERE, "tools"))
+        import bench
+        bench.run_benchmark()
+
+    elif args.command == "lan":
+        local_ip = get_local_ip()
+        print("=== VaporRAM Local Area Network (LAN) Gateway ===")
+        print(f" Local Host IP : {local_ip}")
+        print(f" Web UI URL    : http://{local_ip}:8000/")
+        print(f" API Endpoint  : http://{local_ip}:8000/v1/chat/completions")
+        print(f" Responses API : http://{local_ip}:8000/v1/responses")
+        print("\n Example LAN Request (from another device):")
+        print(f"   curl http://{local_ip}:8000/v1/chat/completions \\")
+        print("     -H 'Content-Type: application/json' \\")
+        print("     -d '{\"model\": \"google/gemma-4-E4B-it\", \"messages\": [{\"role\": \"user\", \"content\": \"Hello!\"}]}'")
 
     elif args.command == "run":
         prompt_str = " ".join(args.prompt)
