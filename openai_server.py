@@ -1,6 +1,6 @@
 import os, sys, json, time, subprocess, mimetypes, threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIST = os.path.join(HERE, "web", "dist")
@@ -9,6 +9,15 @@ DEFAULT_MODEL_DIR = os.path.join(HERE, "models", "gemma-4-E4B-it")
 
 current_model_path = DEFAULT_MODEL_DIR
 download_progress = {"status": "idle", "percent": 0, "message": "Ready"}
+
+def clean_path(path_str):
+    p = path_str.rstrip("/")
+    if not p:
+        return "/"
+    # Clean duplicate /v1 prefixes e.g. /v1/v1/health -> /v1/health
+    while p.startswith("/v1/v1"):
+        p = "/v1" + p[6:]
+    return p
 
 def scan_system_for_models():
     found = []
@@ -62,9 +71,9 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         global current_model_path, download_progress
         parsed = urlparse(self.path)
-        path = parsed.path
+        path = clean_path(parsed.path)
 
-        if path in ("/health", "/v1/health"):
+        if path.endswith("/health"):
             weights_exist = os.path.exists(current_model_path) and any(f.endswith(".safetensors") or f.endswith(".bin") for f in os.listdir(current_model_path)) if os.path.exists(current_model_path) else False
             return self._send_json({
                 "status": "ok",
@@ -77,7 +86,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 "peak_rss_mb": 142.32
             })
 
-        if path in ("/v1/models", "/models"):
+        if path.endswith("/models"):
             weights_exist = os.path.exists(current_model_path) and any(f.endswith(".safetensors") or f.endswith(".bin") for f in os.listdir(current_model_path)) if os.path.exists(current_model_path) else False
             return self._send_json({
                 "object": "list",
@@ -100,7 +109,15 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             })
 
         # Progress polling endpoint
-        if path in ("/v1/system/progress", "/v1/progress", "/v1/system/scan", "/v1/scan"):
+        if path.endswith("/progress") or path.endswith("/system/progress"):
+            return self._send_json({
+                "active_path": current_model_path,
+                "scanned_models": scan_system_for_models(),
+                "download_progress": download_progress
+            })
+
+        # System scan endpoint
+        if path.endswith("/scan") or path.endswith("/system/scan"):
             return self._send_json({
                 "active_path": current_model_path,
                 "scanned_models": scan_system_for_models(),
@@ -108,7 +125,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             })
 
         # Brain Cortex & Profiling metrics endpoints
-        if path in ("/v1/stats", "/v1/cortex", "/v1/profile", "/stats", "/cortex", "/profile"):
+        if any(path.endswith(suffix) for suffix in ("/stats", "/cortex", "/profile")):
             weights_exist = os.path.exists(current_model_path) and any(f.endswith(".safetensors") or f.endswith(".bin") for f in os.listdir(current_model_path)) if os.path.exists(current_model_path) else False
             layers_data = []
             for i in range(1, 33):
@@ -166,7 +183,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             return self._send_json({"error": "Unauthorized API key"}, status=401)
 
         parsed = urlparse(self.path)
-        path = parsed.path
+        path = clean_path(parsed.path)
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length)
 
@@ -176,7 +193,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             payload = {}
 
         # Set custom system model path endpoint
-        if path in ("/v1/system/set_model_path", "/v1/set_model_path"):
+        if path.endswith("/set_model_path") or path.endswith("/system/set_model_path"):
             new_path = payload.get("path", "").strip()
             if new_path and os.path.exists(new_path):
                 current_model_path = new_path
@@ -185,7 +202,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 return self._send_json({"error": f"Path '{new_path}' does not exist on host system"}, status=400)
 
         # Trigger model weights downloader with real-time percentage progress
-        if path in ("/v1/system/download_model", "/v1/download_model"):
+        if path.endswith("/download_model") or path.endswith("/system/download_model"):
             def run_dl():
                 global download_progress
                 steps = [
@@ -208,11 +225,12 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         stream_mode = payload.get("stream", False)
 
         # Extract prompt based on endpoint
-        if path in ("/v1/chat/completions", "/chat/completions"):
+        if any(path.endswith(suffix) for suffix in ("/chat/completions", "/completions", "/responses")):
             messages = payload.get("messages", [])
-            prompt = messages[-1].get("content", "Hello") if messages else "Hello"
-        elif path in ("/v1/completions", "/completions", "/v1/responses", "/responses"):
-            prompt = payload.get("prompt", "Hello")
+            if messages:
+                prompt = messages[-1].get("content", "Hello")
+            else:
+                prompt = payload.get("prompt", "Hello")
         else:
             return self._send_json({"error": f"Endpoint {path} not supported"}, status=404)
 
@@ -276,7 +294,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             return
 
         # Non-streaming JSON Response
-        if path in ("/v1/responses", "/responses"):
+        if path.endswith("/responses"):
             return self._send_json({
                 "id": response_id,
                 "object": "response",
