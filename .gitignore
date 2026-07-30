@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*.o
+c/vapor_engine
+.DS_Store
