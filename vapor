@@ -46,6 +46,7 @@ def main():
     subparsers.add_parser("doctor", help="Run system and hardware diagnostics")
     subparsers.add_parser("plan", help="Display memory budget breakdown (< 1.5 GB RAM)")
     subparsers.add_parser("bench", help="Run performance & RAM benchmark")
+    subparsers.add_parser("profile", help="Run high-precision RAM memory profiler")
     subparsers.add_parser("lan", help="Display LAN IP and network sharing instructions")
     subparsers.add_parser("presets", help="List available persona presets")
     subparsers.add_parser("init-config", help="Create default vapor.json configuration file")
@@ -90,6 +91,11 @@ def main():
         sys.path.insert(0, os.path.join(HERE, "tools"))
         import bench
         bench.run_benchmark()
+
+    elif args.command == "profile":
+        sys.path.insert(0, os.path.join(HERE, "tools"))
+        import profile_memory
+        profile_memory.profile_memory()
 
     elif args.command == "presets":
         list_presets()
