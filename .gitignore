@@ -1,5 +1,7 @@
 __pycache__/
 *.pyc
 *.o
+*.tar.gz
 c/vapor_engine
+c/simd_bench
 .DS_Store

@@ -55,6 +55,10 @@ def main():
     subparsers.add_parser("lan", help="Display LAN IP and network sharing instructions")
     subparsers.add_parser("presets", help="List available persona presets")
     subparsers.add_parser("init-config", help="Create default vapor.json configuration file")
+    subparsers.add_parser("release", help="Build standalone release distribution tarball (.tar.gz)")
+
+    comp_parser = subparsers.add_parser("completion", help="Generate shell autocompletion script (bash/zsh)")
+    comp_parser.add_argument("shell", nargs="?", default="bash", choices=["bash", "zsh"], help="Shell type (bash or zsh)")
 
     download_parser = subparsers.add_parser("download", help="Download google/gemma-4-E4B-it weights")
     download_parser.add_argument("--repo", default="google/gemma-4-E4B-it", help="Hugging Face repo ID")
@@ -111,6 +115,16 @@ def main():
         sys.path.insert(0, os.path.join(HERE, "tools"))
         import configure_wizard
         configure_wizard.run_wizard()
+
+    elif args.command == "completion":
+        sys.path.insert(0, os.path.join(HERE, "tools"))
+        import generate_completion
+        generate_completion.generate(args.shell)
+
+    elif args.command == "release":
+        sys.path.insert(0, os.path.join(HERE, "tools"))
+        import package_release
+        package_release.create_release()
 
     elif args.command == "presets":
         list_presets()
