@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-VaporRAM — Web UI Brand, Aesthetics, Model Detection & Realtime Progress Bar Transformer
-Replaces old Colibri branding, updates color palette, adds Model Detection/Installer UI with live percentage progress bar, and mobile responsive styles.
+VaporRAM — Web UI Brand, Aesthetics, Model Detection & Screen Optimization Transformer
+Replaces old Colibri branding, updates color palette, optimizes screen layout for laptop/desktop displays, and closes SSE streams cleanly.
 """
 import os, sys, re
 
@@ -10,28 +10,28 @@ DIST_DIR = os.path.join(HERE, "web", "dist")
 
 MODEL_DETECTION_UI_HTML = """
 <!-- VaporRAM Model Detection & Connection Bar -->
-<div id="vapor-model-bar" style="background:#071018;border-bottom:1px solid rgba(6,182,212,0.2);padding:0.75rem 1.2rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#f9fafb;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.8rem;z-index:999;">
-  <div style="display:flex;align-items:center;gap:0.8rem;flex-wrap:wrap;">
-    <span style="font-weight:700;font-size:0.9rem;color:#06b6d4;letter-spacing:0.02em;">💨 VaporRAM Engine</span>
-    <span id="model-status-badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);font-size:0.75rem;padding:0.25rem 0.6rem;border-radius:6px;font-weight:600;">● Model Connected (google/gemma-4-E4B-it)</span>
-    <span id="model-conn-badge" style="background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);font-size:0.75rem;padding:0.25rem 0.6rem;border-radius:6px;font-weight:600;">NVMe O_DIRECT Streaming (RAM Ceiling < 1.5 GB)</span>
+<div id="vapor-model-bar" style="background:#071018;border-bottom:1px solid rgba(6,182,212,0.2);padding:0.4rem 1rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#f9fafb;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;z-index:999;box-sizing:border-box;">
+  <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
+    <span style="font-weight:700;font-size:0.85rem;color:#06b6d4;letter-spacing:0.02em;">💨 VaporRAM</span>
+    <span id="model-status-badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);font-size:0.72rem;padding:0.2rem 0.5rem;border-radius:5px;font-weight:600;">● Weights Loaded (google/gemma-4-E4B-it)</span>
+    <span id="model-conn-badge" style="background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);font-size:0.72rem;padding:0.2rem 0.5rem;border-radius:5px;font-weight:600;">NVMe O_DIRECT Streaming (RAM Ceiling < 1.5 GB)</span>
   </div>
 
-  <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
-    <input id="model-path-input" type="text" value="./models/gemma-4-E4B-it" placeholder="Locate system model path..." style="background:#0d1825;color:#f9fafb;border:1px solid rgba(255,255,255,0.15);padding:0.35rem 0.7rem;border-radius:6px;font-size:0.8rem;width:240px;" />
-    <button id="btn-set-path" onclick="window.vaporSetModelPath()" style="background:#06b6d4;color:#000;border:none;padding:0.38rem 0.75rem;border-radius:6px;font-size:0.8rem;font-weight:600;cursor:pointer;">Locate & Load</button>
-    <button id="btn-scan" onclick="window.vaporScanModels()" style="background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:0.38rem 0.75rem;border-radius:6px;font-size:0.8rem;cursor:pointer;">Scan System</button>
-    <button id="btn-download" onclick="window.vaporDownloadModel()" style="background:linear-gradient(135deg,#06b6d4,#6366f1);color:#fff;border:none;padding:0.38rem 0.85rem;border-radius:6px;font-size:0.8rem;font-weight:600;cursor:pointer;">Download Weights</button>
+  <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+    <input id="model-path-input" type="text" value="./models/gemma-4-E4B-it" placeholder="Locate system model path..." style="background:#0d1825;color:#f9fafb;border:1px solid rgba(255,255,255,0.15);padding:0.25rem 0.6rem;border-radius:5px;font-size:0.75rem;width:210px;" />
+    <button id="btn-set-path" onclick="window.vaporSetModelPath()" style="background:#06b6d4;color:#000;border:none;padding:0.28rem 0.65rem;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;">Locate & Load</button>
+    <button id="btn-scan" onclick="window.vaporScanModels()" style="background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:0.28rem 0.65rem;border-radius:5px;font-size:0.75rem;cursor:pointer;">Scan System</button>
+    <button id="btn-download" onclick="window.vaporDownloadModel()" style="background:linear-gradient(135deg,#06b6d4,#6366f1);color:#fff;border:none;padding:0.28rem 0.75rem;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;">Download Weights</button>
   </div>
 </div>
 
 <!-- Realtime Installation & Loading Progress Bar -->
-<div id="vapor-progress-container" style="display:none;background:#0b1522;border-bottom:1px solid rgba(6,182,212,0.3);padding:0.6rem 1.2rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;">
-  <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;margin-bottom:0.35rem;">
+<div id="vapor-progress-container" style="display:none;background:#0b1522;border-bottom:1px solid rgba(6,182,212,0.3);padding:0.4rem 1rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;">
+  <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.75rem;margin-bottom:0.25rem;">
     <span id="vapor-progress-msg" style="color:#06b6d4;font-weight:600;">Initializing installation...</span>
     <span id="vapor-progress-pct" style="color:#f9fafb;font-weight:700;font-family:monospace;">0%</span>
   </div>
-  <div style="width:100%;height:8px;background:#152436;border-radius:4px;overflow:hidden;">
+  <div style="width:100%;height:6px;background:#152436;border-radius:3px;overflow:hidden;">
     <div id="vapor-progress-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#06b6d4,#6366f1);transition:width 0.4s ease;"></div>
   </div>
 </div>
@@ -192,7 +192,7 @@ def fix_js_bundle(js_path):
     print(" -> JS Bundle Branding Updated ✓")
 
 def fix_css_bundle(css_path):
-    print(f"[2/3] Processing CSS bundle & Adding Mobile Responsiveness: {os.path.basename(css_path)}")
+    print(f"[2/3] Processing CSS bundle & Adding Laptop/Mobile Screen Optimization: {os.path.basename(css_path)}")
     with open(css_path, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -201,41 +201,68 @@ def fix_css_bundle(css_path):
     content = content.replace("#052118", "#071927")
 
     responsive_css = """
-/* VaporRAM Small Screen & Mobile Layout Enhancements */
-@media (max-width: 900px) {
+/* VaporRAM Screen Layout Optimization for Laptops (1366x768 / 1472x937) & Mobile */
+html, body {
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+#root {
+  height: calc(100vh - 38px) !important;
+  max-height: calc(100vh - 38px) !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+#root > div {
+  height: 100% !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
+}
+
+aside, div[class*="sidebar"] {
+  height: 100% !important;
+  overflow-y: auto !important;
+}
+
+main, div[class*="main"], div[class*="chat"] {
+  height: 100% !important;
+  max-height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow-y: auto !important;
+}
+
+@media (max-width: 1024px) {
+  #root > div {
+    flex-direction: row !important;
+  }
+  aside, div[class*="sidebar"] {
+    width: 220px !important;
+    min-width: 220px !important;
+  }
+}
+
+@media (max-width: 768px) {
   #root > div {
     flex-direction: column !important;
-    height: 100vh !important;
-    overflow-y: auto !important;
   }
   aside, div[class*="sidebar"] {
     width: 100% !important;
-    max-width: 100% !important;
     min-width: 100% !important;
-    height: auto !important;
-    max-height: 40vh !important;
-    overflow-y: auto !important;
-    border-right: none !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
-  }
-  main, div[class*="main"], div[class*="chat"] {
-    flex: 1 !important;
-    width: 100% !important;
-    min-width: 100% !important;
-  }
-  div[class*="header"] {
-    flex-wrap: wrap !important;
-    gap: 0.5rem !important;
+    max-height: 35vh !important;
   }
 }
 """
-    if "VaporRAM Small Screen" not in content:
+    if "VaporRAM Screen Layout Optimization" not in content:
         content += "\n" + responsive_css
 
     with open(css_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    print(" -> CSS Bundle Responsive Styles Updated ✓")
+    print(" -> CSS Bundle Layout Styles Updated ✓")
 
 def fix_index_html(html_path):
     print(f"[3/3] Processing index.html: {os.path.basename(html_path)}")

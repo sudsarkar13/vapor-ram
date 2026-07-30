@@ -29,3 +29,59 @@
     gap: 0.5rem !important;
   }
 }
+
+
+/* VaporRAM Screen Layout Optimization for Laptops (1366x768 / 1472x937) & Mobile */
+html, body {
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+#root {
+  height: calc(100vh - 38px) !important;
+  max-height: calc(100vh - 38px) !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+#root > div {
+  height: 100% !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
+}
+
+aside, div[class*="sidebar"] {
+  height: 100% !important;
+  overflow-y: auto !important;
+}
+
+main, div[class*="main"], div[class*="chat"] {
+  height: 100% !important;
+  max-height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow-y: auto !important;
+}
+
+@media (max-width: 1024px) {
+  #root > div {
+    flex-direction: row !important;
+  }
+  aside, div[class*="sidebar"] {
+    width: 220px !important;
+    min-width: 220px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  #root > div {
+    flex-direction: column !important;
+  }
+  aside, div[class*="sidebar"] {
+    width: 100% !important;
+    min-width: 100% !important;
+    max-height: 35vh !important;
+  }
+}

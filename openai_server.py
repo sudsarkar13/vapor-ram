@@ -118,7 +118,6 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         # Progress polling & system scan GET endpoints
         if path.endswith("/progress") or path.endswith("/system/progress") or path.endswith("/scan") or path.endswith("/system/scan"):
             res_prog = dict(download_progress)
-            # If status is completed or error, auto-reset to idle after 4 seconds
             if download_progress.get("status") in ("completed", "error"):
                 if completed_reset_timer is None or not completed_reset_timer.is_alive():
                     completed_reset_timer = threading.Timer(4.0, reset_progress_idle)
@@ -250,12 +249,12 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             "wall_time_ms": 73.1
         }
 
-        # Real-time SSE Chunked Streaming
+        # Real-time SSE Chunked Streaming with explicit connection termination
         if stream_mode:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
+            self.send_header("Connection", "close")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("x-vapor-queue-wait-ms", "0")
             self.end_headers()
@@ -277,7 +276,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 }
                 self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode("utf-8"))
                 self.wfile.flush()
-                time.sleep(0.04)
+                time.sleep(0.03)
 
             end_chunk = {
                 "id": response_id,
@@ -295,6 +294,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(f"data: {json.dumps(end_chunk)}\n\n".encode("utf-8"))
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
+            self.close_connection = True
             return
 
         # Non-streaming JSON Response
