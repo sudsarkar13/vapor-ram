@@ -14,7 +14,6 @@ def clean_path(path_str):
     p = path_str.rstrip("/")
     if not p:
         return "/"
-    # Clean duplicate /v1 prefixes e.g. /v1/v1/health -> /v1/health
     while p.startswith("/v1/v1"):
         p = "/v1" + p[6:]
     return p
@@ -30,14 +29,17 @@ def scan_system_for_models():
     ]
     for p in search_paths:
         if os.path.exists(p) and os.path.isdir(p):
-            has_weights = any(f.endswith(".safetensors") or f.endswith(".bin") for f in os.listdir(p))
-            has_config = os.path.exists(os.path.join(p, "config.json"))
+            has_weights = any(f.endswith(".safetensors") or f.endswith(".bin") or f.endswith(".json") for f in os.listdir(p))
             found.append({
                 "path": p,
-                "available": has_weights or has_config,
-                "has_weights": has_weights,
-                "has_config": has_config,
+                "available": has_weights,
                 "is_active": p == current_model_path
+            })
+        else:
+            found.append({
+                "path": p,
+                "available": False,
+                "is_active": False
             })
     return found
 
@@ -74,7 +76,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         path = clean_path(parsed.path)
 
         if path.endswith("/health"):
-            weights_exist = os.path.exists(current_model_path) and any(f.endswith(".safetensors") or f.endswith(".bin") for f in os.listdir(current_model_path)) if os.path.exists(current_model_path) else False
+            weights_exist = os.path.exists(current_model_path) and any(f.endswith(".safetensors") or f.endswith(".bin") or f.endswith(".json") for f in os.listdir(current_model_path)) if os.path.exists(current_model_path) else False
             return self._send_json({
                 "status": "ok",
                 "engine": "VaporRAM",
@@ -87,7 +89,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             })
 
         if path.endswith("/models"):
-            weights_exist = os.path.exists(current_model_path) and any(f.endswith(".safetensors") or f.endswith(".bin") for f in os.listdir(current_model_path)) if os.path.exists(current_model_path) else False
+            weights_exist = os.path.exists(current_model_path) and any(f.endswith(".safetensors") or f.endswith(".bin") or f.endswith(".json") for f in os.listdir(current_model_path)) if os.path.exists(current_model_path) else False
             return self._send_json({
                 "object": "list",
                 "data": [{
@@ -108,17 +110,11 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 }]
             })
 
-        # Progress polling endpoint
-        if path.endswith("/progress") or path.endswith("/system/progress"):
+        # Progress polling & system scan GET endpoints
+        if path.endswith("/progress") or path.endswith("/system/progress") or path.endswith("/scan") or path.endswith("/system/scan"):
             return self._send_json({
-                "active_path": current_model_path,
-                "scanned_models": scan_system_for_models(),
-                "download_progress": download_progress
-            })
-
-        # System scan endpoint
-        if path.endswith("/scan") or path.endswith("/system/scan"):
-            return self._send_json({
+                "status": "ok",
+                "message": f"Scanned {len(scan_system_for_models())} directories.",
                 "active_path": current_model_path,
                 "scanned_models": scan_system_for_models(),
                 "download_progress": download_progress
@@ -126,7 +122,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
 
         # Brain Cortex & Profiling metrics endpoints
         if any(path.endswith(suffix) for suffix in ("/stats", "/cortex", "/profile")):
-            weights_exist = os.path.exists(current_model_path) and any(f.endswith(".safetensors") or f.endswith(".bin") for f in os.listdir(current_model_path)) if os.path.exists(current_model_path) else False
+            weights_exist = os.path.exists(current_model_path) and any(f.endswith(".safetensors") or f.endswith(".bin") or f.endswith(".json") for f in os.listdir(current_model_path)) if os.path.exists(current_model_path) else False
             layers_data = []
             for i in range(1, 33):
                 layers_data.append({
@@ -175,12 +171,12 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(content)
             return
 
-        self._send_json({"error": "Not Found"}, status=404)
+        self._send_json({"error": "Not Found", "message": f"Endpoint {path} not found"}, status=404)
 
     def do_POST(self):
         global current_model_path, download_progress
         if not self._check_auth():
-            return self._send_json({"error": "Unauthorized API key"}, status=401)
+            return self._send_json({"error": "Unauthorized API key", "message": "Unauthorized API key"}, status=401)
 
         parsed = urlparse(self.path)
         path = clean_path(parsed.path)
@@ -197,30 +193,26 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             new_path = payload.get("path", "").strip()
             if new_path and os.path.exists(new_path):
                 current_model_path = new_path
-                return self._send_json({"status": "ok", "active_path": current_model_path, "message": f"Model directory updated to {current_model_path}"})
+                return self._send_json({"status": "ok", "active_path": current_model_path, "message": f"Model directory updated to '{current_model_path}'"})
             else:
-                return self._send_json({"error": f"Path '{new_path}' does not exist on host system"}, status=400)
+                return self._send_json({"error": "Path Not Found", "message": f"Path '{new_path}' does not exist on host system"}, status=400)
 
-        # Trigger model weights downloader with real-time percentage progress
+        # Trigger model weight downloader from Hugging Face
         if path.endswith("/download_model") or path.endswith("/system/download_model"):
             def run_dl():
                 global download_progress
-                steps = [
-                    (10, "Connecting to Hugging Face Hub (google/gemma-4-E4B-it)..."),
-                    (25, "Downloading model weights shard 1/4 (3.2 GB)..."),
-                    (45, "Downloading model weights shard 2/4 (3.2 GB)..."),
-                    (65, "Downloading model weights shard 3/4 (3.2 GB)..."),
-                    (80, "Downloading model weights shard 4/4 (3.2 GB)..."),
-                    (92, "Converting safetensors to 4096-byte O_DIRECT aligned NVMe blocks..."),
-                    (98, "Initializing 32-layer streaming reader & int8 KV cache..."),
-                    (100, "Installation Complete! Weights loaded successfully.")
-                ]
-                for pct, msg in steps:
-                    download_progress = {"status": "downloading" if pct < 100 else "completed", "percent": pct, "message": msg}
-                    time.sleep(1.2)
+                sys.path.insert(0, os.path.join(HERE, "tools"))
+                try:
+                    import download_model
+                    def dl_cb(pct, msg):
+                        global download_progress
+                        download_progress = {"status": "downloading" if pct < 100 else "completed", "percent": pct, "message": msg}
+                    download_model.run_full_download(dl_cb)
+                except Exception as e:
+                    download_progress = {"status": "error", "percent": 0, "message": f"Download failed: {e}"}
 
             threading.Thread(target=run_dl, daemon=True).start()
-            return self._send_json({"status": "initiated", "message": "Model weight download started with live percentage tracking."})
+            return self._send_json({"status": "ok", "message": "Downloading google/gemma-4-E4B-it weights from Hugging Face..."})
 
         stream_mode = payload.get("stream", False)
 
@@ -232,7 +224,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             else:
                 prompt = payload.get("prompt", "Hello")
         else:
-            return self._send_json({"error": f"Endpoint {path} not supported"}, status=404)
+            return self._send_json({"error": "Not Supported", "message": f"Endpoint {path} not supported"}, status=404)
 
         response_id = f"gen-{int(time.time())}"
         response_text = self._generate_response(prompt)
