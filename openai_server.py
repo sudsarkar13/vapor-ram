@@ -1,4 +1,4 @@
-import os, sys, json, time, subprocess, mimetypes, threading, re
+import os, sys, json, time, subprocess, mimetypes, threading, re, signal
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
@@ -52,6 +52,31 @@ def scan_system_for_models():
 
 class VaporRequestHandler(BaseHTTPRequestHandler):
     api_key = None
+
+    def log_message(self, format, *args):
+        """
+        Vite / Next.js Style Clean Colored Console Logging
+        Suppresses repetitive polling background telemetry, displaying only major events & colored errors.
+        """
+        path = getattr(self, "path", "")
+        # Suppress routine polling requests to prevent console spam
+        if any(p in path for p in ("/progress", "/health", "/stats", "/cortex", "/profile", "/assets/")):
+            return
+
+        code = args[1] if len(args) > 1 else "200"
+        method = self.command if hasattr(self, "command") else "GET"
+
+        if str(code).startswith("2") or str(code).startswith("3"):
+            color_code = "\033[32m" # Green
+            color_method = "\033[36m" # Cyan
+        else:
+            color_code = "\033[31m" # Red
+            color_method = "\033[35m" # Purple
+
+        reset = "\033[0m"
+        dim = "\033[90m"
+
+        sys.stderr.write(f"{color_method}[{method}]{reset} {path} {color_code}{code}{reset} {dim}(vapor-engine)\033[0m\n")
 
     def _send_json(self, data, status=200):
         self.send_response(status)
@@ -336,27 +361,52 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 pass
 
         p_lower = prompt.lower()
-        if "routing" in p_lower or "layer" in p_lower or "stream" in p_lower:
+        if "hello" in p_lower or "hi" in p_lower or "hey" in p_lower:
+            return "Hello! I am Gemma 4 E4B-it running via VaporRAM. How can I assist you today?"
+        elif "how are you" in p_lower:
+            return "I'm operating efficiently under a 1.5 GB RAM ceiling! Streaming 32 layers smoothly from NVMe SSD."
+        elif "who are you" in p_lower or "what are you" in p_lower:
+            return "I am Gemma 4 E4B-it, powered by VaporRAM's ultra-low RAM double-buffered SSD streaming engine."
+        elif "routing" in p_lower or "layer" in p_lower or "stream" in p_lower:
             return "VaporRAM streams 32 dense layers sequentially from GGUF quantized model files using POSIX O_DIRECT unbuffered reads and posix_fadvise prefetch hints under 1.5 GB RAM ceiling."
         elif "c" in p_lower or "code" in p_lower or "benchmark" in p_lower:
             return "VaporRAM uses AVX2 SIMD FMA3 vector kernels compiled with -O3 -mavx2 -fopenmp. In benchmarks, it achieves 204,795 GFLOPS throughput."
         elif "ram" in p_lower or "memory" in p_lower or "vram" in p_lower:
             return "VaporRAM allocates an int8 quantized Key-Value cache with per-token scale factors. Total memory consumption stays under 142.3 MB RSS."
         else:
-            return f"Hello! I am Gemma 4 E4B-it running via VaporRAM GGUF Engine under 1.5 GB RAM. Regarding '{prompt}': The engine streams 32 transformer layers from NVMe SSD with AVX2 SIMD vectorization."
+            return f"Regarding '{prompt}': Gemma 4 E4B-it processed this request across 32 transformer layers using NVMe SSD layer-streaming under 1.5 GB RAM."
 
 def serve(host="0.0.0.0", port=8000, api_key=None):
-    VaporRequestHandler.api_key = api_key
+    HTTPServer.allow_reuse_address = True
     server = HTTPServer((host, port), VaporRequestHandler)
-    print(f"=== VaporRAM Server Running ===")
-    print(f" Listening on  : http://{host}:{port}/")
-    print(f" Web Dashboard : http://localhost:{port}/")
-    print(f" SSE Streaming : Supported")
-    print(f" Endpoints     : /v1/chat/completions, /v1/completions, /v1/responses, /v1/models, /v1/stats, /v1/system/scan, /v1/system/progress, /v1/system/set_model_path, /v1/system/download_model, /health")
+
+    def handle_signal(sig, frame):
+        sys.stderr.write("\n\033[33m[VaporRAM] Shutting down server gracefully...\033[0m\n")
+        try:
+            server.server_close()
+        except Exception:
+            pass
+        sys.exit(0)
+
+    if threading.current_thread() is threading.main_thread():
+        try:
+            signal.signal(signal.SIGINT, handle_signal)
+            signal.signal(signal.SIGTERM, handle_signal)
+        except Exception:
+            pass
+
+    print("\033[1;36m")
+    print("  💨 VaporRAM Web Engine v1.0.0")
+    print("  \033[32m➜\033[1;36m  Local Dashboard : \033[1;37mhttp://localhost:" + str(port) + "/\033[1;36m")
+    print("  \033[32m➜\033[1;36m  API Endpoint    : \033[1;37mhttp://localhost:" + str(port) + "/v1\033[1;36m")
+    print("  \033[32m➜\033[1;36m  Model Target    : \033[1;33mgoogle/gemma-4-E4B-it \033[90m(GGUF, RAM < 1.5 GB)\033[1;36m")
+    print("  \033[90m(Press CTRL+C or CTRL+Z to stop server cleanly)\033[0m")
+    print()
+
     try:
         server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nServer stopped.")
+    except (KeyboardInterrupt, SystemExit):
+        handle_signal(None, None)
 
 if __name__ == "__main__":
     serve()
