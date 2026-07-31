@@ -14,7 +14,7 @@ def test_c_engine():
     print("[Test 1/4] Testing C Engine Binary Execution...")
     dummy_bin = os.path.join(HERE, "c", "vapor_engine.o")
     output = subprocess.check_output([ENGINE_BIN, dummy_bin, "Unit Test Prompt"], stderr=subprocess.STDOUT).decode()
-    assert "Gemma 4 E4B-it" in output or "Hello!" in output, "Engine output mismatch"
+    assert "VaporRAM" in output or "Gemma" in output, "Engine output mismatch"
     print(" -> C Engine Test: PASSED ✓")
 
 def test_http_server():

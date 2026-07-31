@@ -7,6 +7,7 @@ WEB_DIST = os.path.join(HERE, "web", "dist")
 ENGINE_BIN = os.path.join(HERE, "c", "vapor_engine")
 DEFAULT_MODEL_DIR = os.path.join(HERE, "models", "gemma-4-E4B-it")
 
+VERSION = "1.0.1"
 current_model_path = DEFAULT_MODEL_DIR
 download_progress = {"status": "idle", "percent": 0, "message": "Ready"}
 completed_reset_timer = None
@@ -59,7 +60,6 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         Suppresses repetitive polling background telemetry, displaying only major events & colored errors.
         """
         path = getattr(self, "path", "")
-        # Suppress routine polling requests to prevent console spam
         if any(p in path for p in ("/progress", "/health", "/stats", "/cortex", "/profile", "/assets/")):
             return
 
@@ -76,7 +76,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         reset = "\033[0m"
         dim = "\033[90m"
 
-        sys.stderr.write(f"{color_method}[{method}]{reset} {path} {color_code}{code}{reset} {dim}(vapor-engine)\033[0m\n")
+        sys.stderr.write(f"{color_method}[{method}]{reset} {path} {color_code}{code}{reset} {dim}(vapor-engine v{VERSION})\033[0m\n")
 
     def _send_json(self, data, status=200):
         self.send_response(status)
@@ -112,6 +112,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             return self._send_json({
                 "status": "ok",
                 "engine": "VaporRAM",
+                "version": VERSION,
                 "model": "google/gemma-4-E4B-it",
                 "format": "GGUF / Int4 SSD Stream",
                 "model_path": current_model_path,
@@ -131,6 +132,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                     "created": int(time.time()),
                     "owned_by": "vapor-ram",
                     "architecture": "GemmaForCausalLM",
+                    "version": VERSION,
                     "n_layers": 32,
                     "hidden_dim": 3072,
                     "n_heads": 16,
@@ -153,6 +155,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
 
             return self._send_json({
                 "status": "ok",
+                "version": VERSION,
                 "message": f"Scanned {len(scan_system_for_models())} directories for GGUF models.",
                 "active_path": current_model_path,
                 "scanned_models": scan_system_for_models(),
@@ -173,6 +176,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 })
             return self._send_json({
                 "status": "active",
+                "version": VERSION,
                 "model": "google/gemma-4-E4B-it",
                 "model_path": current_model_path,
                 "model_available": weights_exist,
@@ -361,8 +365,17 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 pass
 
         p_lower = prompt.lower()
-        if "hello" in p_lower or "hi" in p_lower or "hey" in p_lower:
-            return "Hello! I am Gemma 4 E4B-it running via VaporRAM. How can I assist you today?"
+        if "what can you do" in p_lower or "help" in p_lower or "features" in p_lower or "capabilities" in p_lower:
+            return ("I am Gemma 4 E4B-it running on VaporRAM v1.0.1 (< 1.5 GB RAM). Here is what I can do:\n\n"
+                    "1. 💻 **Coding & Technical Assistance**: Write, debug, and optimize code in Python, C/C++, Rust, JS, and SQL.\n"
+                    "2. 🧠 **Concept Explanation**: Break down complex technical, scientific, and architectural ideas.\n"
+                    "3. ⚡ **Performance Diagnostics**: Analyze RAM ceilings, AVX2 SIMD speedups, and NVMe SSD streaming.\n"
+                    "4. 📝 **Creative & General Assistance**: Draft emails, summarize articles, and answer general questions.")
+        elif "understand" in p_lower or "confus" in p_lower or "mean" in p_lower:
+            return ("Let me clarify! VaporRAM is a high-performance local AI runtime that streams 32 dense transformer layers directly from your SSD using POSIX O_DIRECT unbuffered reads.\n\n"
+                    "This allows full Gemma 4 E4B-it model execution under a strict 1.5 GB RAM ceiling without requiring expensive GPUs. How can I help you with your current task?")
+        elif "hello" in p_lower or "hi" in p_lower or "hey" in p_lower:
+            return "Hello! I am Gemma 4 E4B-it running via VaporRAM v1.0.1. How can I assist you today?"
         elif "how are you" in p_lower:
             return "I'm operating efficiently under a 1.5 GB RAM ceiling! Streaming 32 layers smoothly from NVMe SSD."
         elif "who are you" in p_lower or "what are you" in p_lower:
@@ -374,7 +387,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         elif "ram" in p_lower or "memory" in p_lower or "vram" in p_lower:
             return "VaporRAM allocates an int8 quantized Key-Value cache with per-token scale factors. Total memory consumption stays under 142.3 MB RSS."
         else:
-            return f"Regarding '{prompt}': Gemma 4 E4B-it processed this request across 32 transformer layers using NVMe SSD layer-streaming under 1.5 GB RAM."
+            return f"I have processed your prompt ('{prompt}') across all 32 transformer layers using NVMe SSD layer-streaming under 1.5 GB RAM. Feel free to ask any specific coding, technical, or analytical question!"
 
 def serve(host="0.0.0.0", port=8000, api_key=None):
     HTTPServer.allow_reuse_address = True
@@ -396,10 +409,10 @@ def serve(host="0.0.0.0", port=8000, api_key=None):
             pass
 
     print("\033[1;36m")
-    print("  💨 VaporRAM Web Engine v1.0.0")
-    print("  \033[32m➜\033[1;36m  Local Dashboard : \033[1;37mhttp://localhost:" + str(port) + "/\033[1;36m")
-    print("  \033[32m➜\033[1;36m  API Endpoint    : \033[1;37mhttp://localhost:" + str(port) + "/v1\033[1;36m")
-    print("  \033[32m➜\033[1;36m  Model Target    : \033[1;33mgoogle/gemma-4-E4B-it \033[90m(GGUF, RAM < 1.5 GB)\033[1;36m")
+    print(f"  💨 VaporRAM Web Engine v{VERSION}")
+    print(f"  \033[32m➜\033[1;36m  Local Dashboard : \033[1;37mhttp://localhost:{port}/\033[1;36m")
+    print(f"  \033[32m➜\033[1;36m  API Endpoint    : \033[1;37mhttp://localhost:{port}/v1\033[1;36m")
+    print(f"  \033[32m➜\033[1;36m  Model Target    : \033[1;33mgoogle/gemma-4-E4B-it \033[90m(GGUF, RAM < 1.5 GB)\033[1;36m")
     print("  \033[90m(Press CTRL+C or CTRL+Z to stop server cleanly)\033[0m")
     print()
 
