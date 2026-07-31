@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <dirent.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -19,12 +20,25 @@ StreamingReader* streaming_io_init(const char *model_path, size_t layer_size) {
 
     // Check if model_path is a directory
     if (stat(model_path, &st) == 0 && S_ISDIR(st.st_mode)) {
-        snprintf(file_target, sizeof(file_target), "%s/model.safetensors", model_path);
-        if (access(file_target, F_OK) != 0) {
-            snprintf(file_target, sizeof(file_target), "%s/model-00001-of-00004.safetensors", model_path);
+        int found_gguf = 0;
+        DIR *dir = opendir(model_path);
+        if (dir) {
+            struct dirent *entry;
+            while ((entry = readdir(dir)) != NULL) {
+                if (strstr(entry->d_name, ".gguf") != NULL) {
+                    snprintf(file_target, sizeof(file_target), "%s/%s", model_path, entry->d_name);
+                    found_gguf = 1;
+                    break;
+                }
+            }
+            closedir(dir);
         }
-        if (access(file_target, F_OK) != 0) {
-            snprintf(file_target, sizeof(file_target), "%s/config.json", model_path);
+
+        if (!found_gguf) {
+            snprintf(file_target, sizeof(file_target), "%s/model.safetensors", model_path);
+            if (access(file_target, F_OK) != 0) {
+                snprintf(file_target, sizeof(file_target), "%s/config.json", model_path);
+            }
         }
     } else {
         snprintf(file_target, sizeof(file_target), "%s", model_path);
@@ -48,6 +62,14 @@ StreamingReader* streaming_io_init(const char *model_path, size_t layer_size) {
     if (reader->fd < 0) {
         free(reader);
         return NULL;
+    }
+
+    // Validate GGUF Magic Header ("GGUF" = 0x46554747)
+    char magic[4];
+    if (pread(reader->fd, magic, 4, 0) == 4) {
+        if (memcmp(magic, "GGUF", 4) == 0) {
+            printf("[GGUF Engine] Validated GGUF magic header on %s ✓\n", file_target);
+        }
     }
 
     // Hint Linux kernel for sequential NVMe reading
@@ -83,7 +105,6 @@ void* streaming_io_load_layer(StreamingReader *reader, int layer_idx) {
 
     ssize_t bytes_read = pread(reader->fd, target_buf, reader->layer_size, offset);
     if (bytes_read <= 0) {
-        // If file is smaller than offset or dev/zero, fill buffer safely without error
         memset(target_buf, 0x01, reader->layer_size > 4096 ? 4096 : reader->layer_size);
     }
 
