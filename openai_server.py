@@ -329,14 +329,9 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
     def _generate_response(self, prompt):
         if os.path.exists(current_model_path) and os.path.exists(ENGINE_BIN):
             try:
-                raw_output = subprocess.check_output([ENGINE_BIN, current_model_path, prompt], stderr=subprocess.STDOUT).decode("utf-8")
-                output_match = re.search(r"\[Output\s*\]\s*(.*)", raw_output)
-                if output_match:
-                    return output_match.group(1).strip()
-                lines = [line.strip() for line in raw_output.split("\n") if line.strip()]
-                clean_lines = [l for l in lines if not l.startswith("===") and not l.startswith("[") and not l.startswith("->") and not l.startswith("Executing")]
-                if clean_lines:
-                    return " ".join(clean_lines)
+                raw_output = subprocess.check_output([ENGINE_BIN, current_model_path, prompt], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+                if raw_output:
+                    return raw_output
             except Exception:
                 pass
 

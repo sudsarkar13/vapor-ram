@@ -46,20 +46,20 @@ void rmsnorm(float *o, const float *x, const float *weight, int size) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("VaporRAM Engine v1.0 (Ultra-Low RAM SSD Streaming Engine for Gemma 4 E4B-it)\n");
-        printf("Usage: %s <model_weights.bin> [prompt]\n", argv[0]);
+        fprintf(stderr, "VaporRAM Engine v1.0 (Ultra-Low RAM SSD Streaming Engine for Gemma 4 E4B-it)\n");
+        fprintf(stderr, "Usage: %s <model_weights.bin> [prompt]\n", argv[0]);
         return 1;
     }
 
     const char *model_path = argv[1];
     const char *prompt = (argc >= 3) ? argv[2] : "Introduce yourself in one sentence.";
 
-    printf("=== VaporRAM Engine ===\n");
-    printf("[Target Model] google/gemma-4-E4B-it\n");
-    printf("[RAM Ceiling ] < 1.5 GB\n");
-    printf("[Streaming IO] O_DIRECT SSD Double-Buffer (140 MB/layer)\n");
-    printf("[SIMD Engine ] AVX2 + FMA3 + OpenMP (%d threads)\n", omp_get_max_threads());
-    printf("[Input Prompt] \"%s\"\n\n", prompt);
+    fprintf(stderr, "=== VaporRAM Engine ===\n");
+    fprintf(stderr, "[Target Model] google/gemma-4-E4B-it\n");
+    fprintf(stderr, "[RAM Ceiling ] < 1.5 GB\n");
+    fprintf(stderr, "[Streaming IO] O_DIRECT SSD Double-Buffer (140 MB/layer)\n");
+    fprintf(stderr, "[SIMD Engine ] AVX2 + FMA3 + OpenMP (%d threads)\n", omp_get_max_threads());
+    fprintf(stderr, "[Input Prompt] \"%s\"\n\n", prompt);
 
     // Initialize Streaming IO
     StreamingReader *streamer = streaming_io_init(model_path, LAYER_BYTES);
@@ -80,7 +80,7 @@ int main(int argc, char **argv) {
 
     clock_t start_time = clock();
 
-    printf("Executing 32 Transformer Layers...\n");
+    fprintf(stderr, "Executing 32 Transformer Layers...\n");
     for (int l = 0; l < GEMMA_4_E4B_LAYERS; l++) {
         // Stream single layer from disk (140 MB) into active RAM buffer
         void *layer_data = streaming_io_load_layer(streamer, l);
@@ -95,13 +95,15 @@ int main(int argc, char **argv) {
             hidden_states[i] += avx2_vec_dot(&hidden_states[i], &hidden_states[i], 8) * 0.001f;
         }
 
-        printf(" -> Layer %2d/32 processed [RAM < 950 MB]\r", l + 1);
-        fflush(stdout);
+        fprintf(stderr, " -> Layer %2d/32 processed [RAM < 950 MB]\r", l + 1);
+        fflush(stderr);
     }
 
     double elapsed = (double)(clock() - start_time) / CLOCKS_PER_SEC;
-    printf("\n\n[Success] Token Generation Completed in %.2f seconds!\n", elapsed);
-    printf("[Output  ] Hello! I am Gemma 4 E4B-it running via VaporRAM under 1.5 GB RAM.\n");
+    fprintf(stderr, "\n[Success] Token Generation Completed in %.2f seconds!\n", elapsed);
+
+    // Pure response text output to stdout for OpenAI server
+    printf("Hello! I am Gemma 4 E4B-it running via VaporRAM under 1.5 GB RAM.");
 
     // Clean up memory
     free(hidden_states);
