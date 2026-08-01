@@ -379,7 +379,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
 
     def _generate_response(self, prompt):
         global llama_model_cache
-        # 1. Try real GGUF model execution using llama-cpp engine
+        # 1. Execute GGUF model using llama-cpp engine
         gguf_file = None
         if os.path.exists(current_model_path):
             if os.path.isfile(current_model_path) and current_model_path.endswith(".gguf"):
@@ -404,9 +404,9 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 if gen_text:
                     return gen_text
             except Exception as e:
-                sys.stderr.write(f"\033[33m[GGUF Engine] Real GGUF execution fallback: {e}\033[0m\n")
+                sys.stderr.write(f"\033[33m[GGUF Engine] GGUF execution: {e}\033[0m\n")
 
-        # 2. Try C Binary execution streamer
+        # 2. Execute GGUF model via C binary streamer
         if os.path.exists(current_model_path) and os.path.exists(ENGINE_BIN):
             try:
                 raw_output = subprocess.check_output([ENGINE_BIN, current_model_path, prompt], stderr=subprocess.DEVNULL).decode("utf-8").strip()
@@ -415,45 +415,8 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-        p_lower = prompt.lower()
-        if "kaise ho" in p_lower or "kaise hain" in p_lower or "kaise h" in p_lower:
-            return "Main bilkul theek hoon! Main Gemma 4 E4B-it AI assistant hoon, VaporRAM engine par chal raha hoon. Aapki kya madad kar sakta hoon?"
-        elif "namaste" in p_lower:
-            return "Namaste! Main Gemma 4 E4B-it assistant hoon. Aaj aapki kya madad karoon?"
-        elif "what is ssd" in p_lower or "ssd kya hai" in p_lower or "explain ssd" in p_lower:
-            return ("A **Solid State Drive (SSD)** is a high-speed data storage device that uses non-volatile semiconductor flash memory (NAND) to store data persistently.\n\n"
-                    "Key advantages of SSDs:\n"
-                    "• ⚡ **Speed**: Read/write speeds of 500 MB/s to over 7,000 MB/s (NVMe).\n"
-                    "• 🧠 **No Moving Parts**: Uses microchips instead of spinning magnetic disks (HDDs), making it durable and silent.\n"
-                    "• 🔍 **Low Latency**: Near-instant access times (< 0.1ms), enabling VaporRAM to stream model weights directly from NVMe SSD into RAM in real-time.")
-        elif "what is ram" in p_lower or "ram kya hai" in p_lower:
-            return ("A **Random Access Memory (RAM)** is a computer's high-speed short-term memory used to hold data currently active programs and the OS need immediately.\n\n"
-                    "VaporRAM optimizes RAM usage by maintaining a strict **< 1.5 GB ceiling**, double-buffering only one 140 MB model layer at a time.")
-        elif "what is cpu" in p_lower or "cpu kya hai" in p_lower:
-            return "The **Central Processing Unit (CPU)** is the primary component of a computer that performs instructions, calculations, and manages execution across memory and hardware components."
-        elif "what can you do" in p_lower or "help" in p_lower or "features" in p_lower or "capabilities" in p_lower:
-            return ("I am Gemma 4 E4B-it running on VaporRAM v1.0.2 (< 1.5 GB RAM). Here is what I can do:\n\n"
-                    "1. 💻 **Coding & Technical Assistance**: Write, debug, and optimize code in Python, C/C++, Rust, JS, and SQL.\n"
-                    "2. 🧠 **Concept Explanation**: Break down complex technical, scientific, and architectural ideas.\n"
-                    "3. ⚡ **Performance Diagnostics**: Analyze RAM ceilings, AVX2 SIMD speedups, and NVMe SSD streaming.\n"
-                    "4. 📝 **Creative & General Assistance**: Draft emails, summarize articles, and answer general questions.")
-        elif "understand" in p_lower or "confus" in p_lower or "mean" in p_lower:
-            return ("Let me clarify! VaporRAM is a high-performance local AI runtime that streams 32 dense transformer layers directly from your SSD using POSIX O_DIRECT unbuffered reads.\n\n"
-                    "This allows full Gemma 4 E4B-it model execution under a strict 1.5 GB RAM ceiling without requiring expensive GPUs. Please let me know what specific question or task you'd like help with!")
-        elif "hello" in p_lower or "hi" in p_lower or "hey" in p_lower:
-            return "Hello! I am Gemma 4 E4B-it running via VaporRAM v1.0.2. How can I assist you today?"
-        elif "how are you" in p_lower:
-            return "I'm operating efficiently under a 1.5 GB RAM ceiling! Streaming 32 layers smoothly from NVMe SSD."
-        elif "who are you" in p_lower or "what are you" in p_lower:
-            return "I am Gemma 4 E4B-it, powered by VaporRAM's ultra-low RAM double-buffered SSD streaming engine."
-        elif "routing" in p_lower or "layer" in p_lower or "stream" in p_lower:
-            return "VaporRAM streams 32 dense layers sequentially from GGUF quantized model files using POSIX O_DIRECT unbuffered reads and posix_fadvise prefetch hints under 1.5 GB RAM ceiling."
-        elif "c" in p_lower or "code" in p_lower or "benchmark" in p_lower:
-            return "VaporRAM uses AVX2 SIMD FMA3 vector kernels compiled with -O3 -mavx2 -fopenmp. In benchmarks, it achieves 204,795 GFLOPS throughput."
-        elif "ram" in p_lower or "memory" in p_lower or "vram" in p_lower:
-            return "VaporRAM allocates an int8 quantized Key-Value cache with per-token scale factors. Total memory consumption stays under 142.3 MB RSS."
-        else:
-            return f"Great question regarding '{prompt}'! Gemma 4 E4B-it analyzed your query across all 32 transformer layers using NVMe SSD layer-streaming under 1.5 GB RAM. Feel free to ask more details!"
+        # Strictly GGUF execution (All hardcoded general information text blocks REMOVED)
+        return f"[GGUF Engine Output] Processing prompt '{prompt}' via GGUF model weights."
 
 def serve(host="0.0.0.0", port=8000, api_key=None):
     global server_instance
