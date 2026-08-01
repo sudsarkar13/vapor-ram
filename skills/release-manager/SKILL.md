@@ -1,6 +1,6 @@
 ---
 name: release-manager
-description: Standard operating procedure for version bumping, Web UI asset transformation, C engine compilation, binary staging, GitHub Release tagging with OS binary attachments, PyPI distribution publishing via virtualenv twine, and GitHub Pages synchronization. ONLY activate this skill when the user explicitly requests or initiates a new version release or version bump.
+description: Standard operating procedure for version bumping, Web UI asset transformation, C engine compilation, binary staging, version-specific release notes generation (version diff comparison & bug fix summary), clean release channel tagging (Stable/Beta/Alpha), GitHub Release publishing, PyPI distribution via virtualenv twine, and GitHub Pages synchronization. ONLY activate this skill when the user explicitly requests or initiates a new version release or version bump.
 ---
 
 # Release Manager Skill
@@ -11,10 +11,31 @@ This skill defines the mandatory, step-by-step workflow for cutting new version 
 
 ---
 
+## 📌 Release Naming & Versioning Rules
+
+### 1. Release Channel Categorization
+Every version release MUST be categorized into one of three official channels:
+- **Stable Release**: `vX.Y.Z — Stable Release` (Default production release)
+- **Beta Release**: `vX.Y.Z-beta.N — Beta Release` (Testing release with feature-complete additions)
+- **Alpha Release**: `vX.Y.Z-alpha.N — Alpha Release` (Early preview release)
+
+> **Do NOT** add custom verbose titles like `v1.0.4 Release — Standalone OS Builds`. Keep titles clean, standardized, and professional.
+
+### 2. Version-Specific Release Notes (NO Full Historical Changelog)
+When publishing a GitHub Release, **DO NOT** attach the entire `CHANGELOG.md` file. The GitHub Release notes MUST be **strictly limited to the delta between the Previous Version and the New Version**.
+
+Every release note MUST contain:
+1. **Comparison Header**: `What's Changed from v<PREVIOUS> to v<NEW>`
+2. **Release Channel**: `Channel: Stable` (or `Beta` / `Alpha`)
+3. **Fixed Bugs & Resolved Issues**: Exact bulleted list of bugs fixed in this update.
+4. **New Features & Enhancements**: Exact bulleted list of features/improvements introduced.
+
+---
+
 ## 📋 Standard Operating Procedure (SOP)
 
 ### 1. Version Bumping Across All Manifests
-Update the target version string `X.Y.Z` consistently in all 10 target manifest files:
+Update the target version string `X.Y.Z` (or `X.Y.Z-beta.N`) consistently in all target manifest files:
 
 - `version.py`: `__version__ = "X.Y.Z"`
 - `setup.py`: `version="X.Y.Z"`
@@ -25,7 +46,7 @@ Update the target version string `X.Y.Z` consistently in all 10 target manifest 
 - `tools/package_release.py`: `VERSION = "X.Y.Z"`
 - `tools/download_model.py`: `User-Agent: VaporRAM/X.Y.Z`
 - `tools/fix_webui.py`: UI Header badge `💨 VaporRAM vX.Y.Z`
-- `CHANGELOG.md`: Prepend new section `## [vX.Y.Z] - YYYY-MM-DD` detailing highlights and fixes.
+- `CHANGELOG.md`: Prepend new section `## [vX.Y.Z] - YYYY-MM-DD`.
 
 ---
 
@@ -76,27 +97,46 @@ python3 setup.py sdist bdist_wheel
 
 ---
 
-### 6. Git Commit (Including C Binary), Tagging, and GitHub Release Publishing
-Commit modified source files **AND the compiled `c/vapor_engine` binary**, create annotated release tag, push to main, and publish GitHub Release with OS binary attachments:
+### 6. Generate Version-Specific Notes & Publish GitHub Release
+1. Write version-specific notes comparing Previous Version vs New Version into `RELEASE_NOTES.md`:
+
+```markdown
+# vX.Y.Z — Stable Release
+
+## 🔄 What's Changed (v<PREVIOUS> ➔ v<NEW>)
+- **Channel**: Stable Release
+
+### 🐛 Fixed Bugs & Issues
+- Bullet list of exact bugs fixed in this release
+
+### ✨ New Features & Enhancements
+- Bullet list of new features added in this release
+```
+
+2. Commit modified source files **AND the compiled `c/vapor_engine` binary**:
 
 ```bash
-# 1. Stage source files AND compiled c/vapor_engine binary
+# Stage source files AND compiled c/vapor_engine binary
 git add version.py setup.py pyproject.toml openai_server.py vapor c/vapor_engine c/vapor_engine.c tools/package_release.py tools/fix_webui.py web/ CHANGELOG.md .gitignore
-git commit -m "Release vX.Y.Z: <Highlights Summary>"
+git commit -m "Release vX.Y.Z: Stable Release — <Highlights Summary>"
 
-# 2. Push main branch
+# Push main branch
 TOKEN=$(gh auth token)
 git push https://sudsarkar13:${TOKEN}@github.com/sudsarkar13/vapor-ram.git main
 
-# 3. Create & push tag
-git tag -a vX.Y.Z -m "vX.Y.Z Release — Standalone OS Builds"
+# Create & push tag
+git tag -a vX.Y.Z -m "vX.Y.Z — Stable Release"
 git push https://sudsarkar13:${TOKEN}@github.com/sudsarkar13/vapor-ram.git vX.Y.Z
 
-# 4. Create GitHub release with standalone Linux & macOS tarball attachments
+# Publish GitHub Release with version-specific notes ONLY (NOT full CHANGELOG.md)
+# For Stable Release:
 gh release create vX.Y.Z vapor-ram-vX.Y.Z-linux-x86_64.tar.gz vapor-ram-vX.Y.Z-macos.tar.gz \
-  --title "vX.Y.Z — <Title>" \
-  --notes-file CHANGELOG.md \
+  --title "vX.Y.Z — Stable Release" \
+  --notes-file RELEASE_NOTES.md \
   --repo sudsarkar13/vapor-ram
+
+# For Alpha / Beta Pre-Releases, add --prerelease flag:
+# gh release create vX.Y.Z-beta.1 ... --prerelease --title "vX.Y.Z-beta.1 — Beta Release" ...
 ```
 
 ---
@@ -127,15 +167,4 @@ source ~/.venv/bin/activate
 
 # 2. Upload wheel and source distributions to PyPI
 twine upload dist/vapor_ram-X.Y.Z*
-```
-
-Expected Terminal Output:
-```text
-Uploading distributions to https://upload.pypi.org/legacy/
-Uploading vapor_ram-X.Y.Z-py3-none-any.whl
-100% ---------------------------------------- 27.4/27.4 kB • 00:00 • 73.8 MB/s
-Uploading vapor_ram-X.Y.Z.tar.gz
-100% ---------------------------------------- 28.9/28.9 kB • 00:00 • 76.5 MB/s
-
-View at: https://pypi.org/project/vapor-ram/X.Y.Z/
 ```
