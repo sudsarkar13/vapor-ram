@@ -4,6 +4,16 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 ---
 
+## [v1.0.6] - 2026-08-01
+
+### 🚀 Highlights & Features
+- **Linux Terminal Signal Shutdown (CTRL+C)**: Fixed socket polling and signal handling in `openai_server.py` so pressing `CTRL+C` in Linux terminals immediately exits without hanging.
+- **8,192 Max Output Tokens & Context Expansion**: Expanded generation token ceiling to **8,192 tokens** (`max_tokens=8192` & `n_ctx=8192`) for long multi-page responses.
+- **Cross-Platform `doctor` Inspector**: Added native macOS MacBook hardware identification (Apple Silicon M1–M5 family & A18 Pro) and ARM NEON / AMX matrix extension detection.
+- **Release Manager SOP Refactor**: Standardized semantic release channel naming (`Stable`, `Beta`, `Alpha`) and version-specific release notes generation comparing previous (`v1.0.5`) and current (`v1.0.6`) versions.
+
+---
+
 ## [v1.0.5] - 2026-08-01
 
 ### 🚀 Highlights & Web UI Fixes

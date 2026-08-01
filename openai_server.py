@@ -7,7 +7,7 @@ WEB_DIST = os.path.join(HERE, "web", "dist")
 ENGINE_BIN = os.path.join(HERE, "c", "vapor_engine")
 DEFAULT_MODEL_DIR = os.path.join(HERE, "models", "gemma-4-E4B-it")
 
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 current_model_path = DEFAULT_MODEL_DIR
 download_progress = {"status": "idle", "percent": 0, "message": "Ready"}
 completed_reset_timer = None
