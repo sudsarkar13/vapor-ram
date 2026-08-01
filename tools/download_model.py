@@ -20,7 +20,7 @@ def download_file_with_progress(url, target_path, label="GGUF Model", progress_c
     temp_path = target_path + ".tmp"
     
     print(f"[*] Downloading {label} from {url}...")
-    req = urllib.request.Request(url, headers={"User-Agent": "VaporRAM/1.0.1 GGUF Engine"})
+    req = urllib.request.Request(url, headers={"User-Agent": "VaporRAM/1.0.2 GGUF Engine"})
     
     with urllib.request.urlopen(req) as resp:
         total_size = int(resp.headers.get("Content-Length", 0))
@@ -56,7 +56,7 @@ def run_full_download(progress_callback=None):
         try:
             if progress_callback:
                 progress_callback(5, "Fetching model metadata config.json...")
-            req = urllib.request.Request(CONFIG_URL, headers={"User-Agent": "VaporRAM/1.0.1"})
+            req = urllib.request.Request(CONFIG_URL, headers={"User-Agent": "VaporRAM/1.0.2"})
             with urllib.request.urlopen(req) as resp, open(TARGET_CONFIG_PATH, "wb") as f:
                 f.write(resp.read())
         except Exception as e:

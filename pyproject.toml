@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vapor-ram"
-version = "1.0.1"
+version = "1.0.2"
 description = "Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it (< 1.5 GB RAM)"
 readme = "README.md"
 authors = [
     { name = "Sudeepta Sarkar (sudsarkar13)", email = "sudsarkar13@gmail.com" }
 ]
-license = "Apache-2.0"
+license = { text = "Apache-2.0" }
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: POSIX :: Linux",

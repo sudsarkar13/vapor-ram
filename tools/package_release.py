@@ -6,7 +6,7 @@ Compiles binaries, packages assets, and builds a standalone distribution tarball
 import os, sys, shutil, tarfile, subprocess
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 DIST_NAME = f"vapor-ram-v{VERSION}-linux-x86_64"
 OUTPUT_TAR = f"{DIST_NAME}.tar.gz"
 
