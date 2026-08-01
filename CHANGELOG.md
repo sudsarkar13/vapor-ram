@@ -4,6 +4,15 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 ---
 
+## [v1.0.4] - 2026-08-01
+
+### 🚀 Highlights & Automated Features
+- **Zero-Config Automated Dependency Installer**: Automatic self-installation of `llama-cpp-python` upon server startup across all devices (Ubuntu, Debian, Fedora, Arch, macOS) with 0 manual steps required by the user.
+- **MacBook / macOS Standalone Package Support**: Added `.tar.gz` standalone release distribution packaging for macOS (`vapor-ram-v1.0.4-macos.tar.gz`) alongside Linux (`vapor-ram-v1.0.4-linux-x86_64.tar.gz`).
+- **Standardized Release Automation**: Implemented the `release-manager` SOP skill defining multi-platform packaging, PyPI distribution building, and GitHub Pages documentation synchronization.
+
+---
+
 ## [v1.0.3] - 2026-08-01
 
 ### 🚀 Highlights & Features

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vapor-ram"
-version = "1.0.3"
+version = "1.0.4"
 description = "Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it (< 1.5 GB RAM)"
 readme = "README.md"
 authors = [
