@@ -433,12 +433,12 @@ def serve(host="0.0.0.0", port=8000, api_key=None):
     server_instance = HTTPServer((host, port), VaporRequestHandler)
 
     def handle_signal(sig, frame):
-        sys.stderr.write("\n\033[33m[VaporRAM] Shutting down server gracefully...\033[0m\n")
+        sys.stderr.write("\n\033[33m[VaporRAM] Server stopped via terminal (CTRL+C).\033[0m\n")
         try:
             server_instance.server_close()
         except Exception:
             pass
-        sys.exit(0)
+        os._exit(0)
 
     if threading.current_thread() is threading.main_thread():
         try:
@@ -455,8 +455,10 @@ def serve(host="0.0.0.0", port=8000, api_key=None):
     print("  \033[90m(Press CTRL+C or use Web UI Stop/Restart buttons to control server)\033[0m")
     print()
 
+    server_instance.timeout = 0.5
     try:
-        server_instance.serve_forever()
+        while True:
+            server_instance.handle_request()
     except (KeyboardInterrupt, SystemExit):
         handle_signal(None, None)
 
