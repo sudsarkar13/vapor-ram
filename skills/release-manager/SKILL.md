@@ -1,6 +1,6 @@
 ---
 name: release-manager
-description: Standard operating procedure for version bumping, Web UI asset transformation, C engine compilation, binary staging, GitHub Release tagging with OS binary attachments, PyPI distribution publishing, and GitHub Pages synchronization. ONLY activate this skill when the user explicitly requests or initiates a new version release or version bump.
+description: Standard operating procedure for version bumping, Web UI asset transformation, C engine compilation, binary staging, GitHub Release tagging with OS binary attachments, PyPI distribution publishing via virtualenv twine, and GitHub Pages synchronization. ONLY activate this skill when the user explicitly requests or initiates a new version release or version bump.
 ---
 
 # Release Manager Skill
@@ -118,10 +118,24 @@ git push https://sudsarkar13:${TOKEN}@github.com/sudsarkar13/vapor-ram.git main
 
 ---
 
-### 8. PyPI Package Upload Command
-Upload distributions to PyPI using `twine`:
+### 8. PyPI Package Upload Command (via Virtual Environment)
+Upload built distributions (`.whl` and `.tar.gz`) to PyPI by activating the Python virtual environment (`~/.venv`) and using `twine`:
 
 ```bash
-python3 -m pip install --upgrade twine
-python3 -m twine upload dist/vapor_ram-X.Y.Z*
+# 1. Activate virtual environment containing twine
+source ~/.venv/bin/activate
+
+# 2. Upload wheel and source distributions to PyPI
+twine upload dist/vapor_ram-X.Y.Z*
+```
+
+Expected Terminal Output:
+```text
+Uploading distributions to https://upload.pypi.org/legacy/
+Uploading vapor_ram-X.Y.Z-py3-none-any.whl
+100% ---------------------------------------- 27.4/27.4 kB • 00:00 • 73.8 MB/s
+Uploading vapor_ram-X.Y.Z.tar.gz
+100% ---------------------------------------- 28.9/28.9 kB • 00:00 • 76.5 MB/s
+
+View at: https://pypi.org/project/vapor-ram/X.Y.Z/
 ```
