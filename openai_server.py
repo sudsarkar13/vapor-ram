@@ -7,10 +7,11 @@ WEB_DIST = os.path.join(HERE, "web", "dist")
 ENGINE_BIN = os.path.join(HERE, "c", "vapor_engine")
 DEFAULT_MODEL_DIR = os.path.join(HERE, "models", "gemma-4-E4B-it")
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 current_model_path = DEFAULT_MODEL_DIR
 download_progress = {"status": "idle", "percent": 0, "message": "Ready"}
 completed_reset_timer = None
+server_instance = None
 
 def reset_progress_idle():
     global download_progress
@@ -231,6 +232,26 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         except Exception:
             payload = {}
 
+        # Interactive Server Control: Stop Server Endpoint
+        if path.endswith("/stop") or path.endswith("/system/stop"):
+            self._send_json({"status": "ok", "message": "VaporRAM Server stopping cleanly..."})
+            def delayed_stop():
+                time.sleep(0.5)
+                sys.stderr.write("\033[33m[VaporRAM] Server stopped via Web UI command.\033[0m\n")
+                os._exit(0)
+            threading.Thread(target=delayed_stop, daemon=True).start()
+            return
+
+        # Interactive Server Control: Restart Server Endpoint
+        if path.endswith("/restart") or path.endswith("/system/restart"):
+            self._send_json({"status": "ok", "message": "Restarting VaporRAM server in-place..."})
+            def delayed_restart():
+                time.sleep(0.5)
+                sys.stderr.write("\033[36m[VaporRAM] Restarting server process in same terminal window...\033[0m\n")
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+            threading.Thread(target=delayed_restart, daemon=True).start()
+            return
+
         # Set custom system model path endpoint
         if path.endswith("/set_model_path") or path.endswith("/system/set_model_path"):
             new_path = payload.get("path", "").strip()
@@ -366,7 +387,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
 
         p_lower = prompt.lower()
         if "what can you do" in p_lower or "help" in p_lower or "features" in p_lower or "capabilities" in p_lower:
-            return ("I am Gemma 4 E4B-it running on VaporRAM v1.0.1 (< 1.5 GB RAM). Here is what I can do:\n\n"
+            return ("I am Gemma 4 E4B-it running on VaporRAM v1.0.2 (< 1.5 GB RAM). Here is what I can do:\n\n"
                     "1. 💻 **Coding & Technical Assistance**: Write, debug, and optimize code in Python, C/C++, Rust, JS, and SQL.\n"
                     "2. 🧠 **Concept Explanation**: Break down complex technical, scientific, and architectural ideas.\n"
                     "3. ⚡ **Performance Diagnostics**: Analyze RAM ceilings, AVX2 SIMD speedups, and NVMe SSD streaming.\n"
@@ -375,7 +396,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             return ("Let me clarify! VaporRAM is a high-performance local AI runtime that streams 32 dense transformer layers directly from your SSD using POSIX O_DIRECT unbuffered reads.\n\n"
                     "This allows full Gemma 4 E4B-it model execution under a strict 1.5 GB RAM ceiling without requiring expensive GPUs. How can I help you with your current task?")
         elif "hello" in p_lower or "hi" in p_lower or "hey" in p_lower:
-            return "Hello! I am Gemma 4 E4B-it running via VaporRAM v1.0.1. How can I assist you today?"
+            return "Hello! I am Gemma 4 E4B-it running via VaporRAM v1.0.2. How can I assist you today?"
         elif "how are you" in p_lower:
             return "I'm operating efficiently under a 1.5 GB RAM ceiling! Streaming 32 layers smoothly from NVMe SSD."
         elif "who are you" in p_lower or "what are you" in p_lower:
@@ -390,13 +411,14 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             return f"I have processed your prompt ('{prompt}') across all 32 transformer layers using NVMe SSD layer-streaming under 1.5 GB RAM. Feel free to ask any specific coding, technical, or analytical question!"
 
 def serve(host="0.0.0.0", port=8000, api_key=None):
+    global server_instance
     HTTPServer.allow_reuse_address = True
-    server = HTTPServer((host, port), VaporRequestHandler)
+    server_instance = HTTPServer((host, port), VaporRequestHandler)
 
     def handle_signal(sig, frame):
         sys.stderr.write("\n\033[33m[VaporRAM] Shutting down server gracefully...\033[0m\n")
         try:
-            server.server_close()
+            server_instance.server_close()
         except Exception:
             pass
         sys.exit(0)
@@ -413,11 +435,11 @@ def serve(host="0.0.0.0", port=8000, api_key=None):
     print(f"  \033[32m➜\033[1;36m  Local Dashboard : \033[1;37mhttp://localhost:{port}/\033[1;36m")
     print(f"  \033[32m➜\033[1;36m  API Endpoint    : \033[1;37mhttp://localhost:{port}/v1\033[1;36m")
     print(f"  \033[32m➜\033[1;36m  Model Target    : \033[1;33mgoogle/gemma-4-E4B-it \033[90m(GGUF, RAM < 1.5 GB)\033[1;36m")
-    print("  \033[90m(Press CTRL+C or CTRL+Z to stop server cleanly)\033[0m")
+    print("  \033[90m(Press CTRL+C or use Web UI Stop/Restart buttons to control server)\033[0m")
     print()
 
     try:
-        server.serve_forever()
+        server_instance.serve_forever()
     except (KeyboardInterrupt, SystemExit):
         handle_signal(None, None)
 

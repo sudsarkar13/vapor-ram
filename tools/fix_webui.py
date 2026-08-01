@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-VaporRAM — Web UI Brand, Aesthetics, Model Detection & Screen Optimization Transformer
-Replaces old Colibri branding, updates color palette, optimizes screen layout for laptop/desktop displays, and closes SSE streams cleanly.
+VaporRAM — Web UI Brand, Aesthetics, Model Detection, Server Lifecycle & Screen Optimization Transformer
+Replaces old Colibri branding, updates color palette, adds Stop/Restart server buttons, and optimizes screen layout.
 """
 import os, sys, re
 
@@ -12,16 +12,18 @@ MODEL_DETECTION_UI_HTML = """
 <!-- VaporRAM Model Detection & Connection Bar -->
 <div id="vapor-model-bar" style="position:sticky;top:0;left:0;width:100%;background:#071018;border-bottom:1px solid rgba(6,182,212,0.2);padding:0.4rem 1rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#f9fafb;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;z-index:9999;box-sizing:border-box;">
   <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
-    <span style="font-weight:700;font-size:0.85rem;color:#06b6d4;letter-spacing:0.02em;">💨 VaporRAM</span>
+    <span style="font-weight:700;font-size:0.85rem;color:#06b6d4;letter-spacing:0.02em;">💨 VaporRAM v1.0.2</span>
     <span id="model-status-badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);font-size:0.72rem;padding:0.2rem 0.5rem;border-radius:5px;font-weight:600;">● Weights Loaded (google/gemma-4-E4B-it)</span>
-    <span id="model-conn-badge" style="background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);font-size:0.72rem;padding:0.2rem 0.5rem;border-radius:5px;font-weight:600;">NVMe O_DIRECT Streaming (RAM Ceiling < 1.5 GB)</span>
+    <span id="model-conn-badge" style="background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);font-size:0.72rem;padding:0.2rem 0.5rem;border-radius:5px;font-weight:600;">NVMe O_DIRECT GGUF Streaming (RAM Ceiling < 1.5 GB)</span>
   </div>
 
   <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-    <input id="model-path-input" type="text" value="./models/gemma-4-E4B-it" placeholder="Locate system model path..." style="background:#0d1825;color:#f9fafb;border:1px solid rgba(255,255,255,0.15);padding:0.25rem 0.6rem;border-radius:5px;font-size:0.75rem;width:210px;" />
+    <input id="model-path-input" type="text" value="./models/gemma-4-E4B-it" placeholder="Locate system model path..." style="background:#0d1825;color:#f9fafb;border:1px solid rgba(255,255,255,0.15);padding:0.25rem 0.6rem;border-radius:5px;font-size:0.75rem;width:190px;" />
     <button id="btn-set-path" onclick="window.vaporSetModelPath()" style="background:#06b6d4;color:#000;border:none;padding:0.28rem 0.65rem;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;">Locate & Load</button>
     <button id="btn-scan" onclick="window.vaporScanModels()" style="background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);padding:0.28rem 0.65rem;border-radius:5px;font-size:0.75rem;cursor:pointer;">Scan System</button>
-    <button id="btn-download" onclick="window.vaporDownloadModel()" style="background:linear-gradient(135deg,#06b6d4,#6366f1);color:#fff;border:none;padding:0.28rem 0.75rem;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;">Download Weights</button>
+    <button id="btn-download" onclick="window.vaporDownloadModel()" style="background:linear-gradient(135deg,#06b6d4,#6366f1);color:#fff;border:none;padding:0.28rem 0.75rem;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;">Download GGUF</button>
+    <button id="btn-restart-server" onclick="window.vaporRestartServer()" style="background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);padding:0.28rem 0.65rem;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;">🔄 Restart</button>
+    <button id="btn-stop-server" onclick="window.vaporStopServer()" style="background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);padding:0.28rem 0.65rem;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;">🛑 Stop Engine</button>
   </div>
 </div>
 
@@ -52,14 +54,14 @@ window.vaporCheckStatus = async function() {
       if (statusBadge) {
         statusBadge.style.background = 'rgba(16,185,129,0.15)';
         statusBadge.style.color = '#10b981';
-        statusBadge.innerText = '● Weights Loaded (google/gemma-4-E4B-it)';
+        statusBadge.innerText = '● GGUF Loaded (google/gemma-4-E4B-it)';
       }
-      if (connBadge) connBadge.innerText = 'NVMe O_DIRECT Streaming (RAM Ceiling < 1.5 GB)';
+      if (connBadge) connBadge.innerText = 'NVMe O_DIRECT GGUF Streaming (RAM Ceiling < 1.5 GB)';
     } else {
       if (statusBadge) {
         statusBadge.style.background = 'rgba(245,158,11,0.15)';
         statusBadge.style.color = '#f59e0b';
-        statusBadge.innerText = '⚠️ Weights Required (Click Download Weights)';
+        statusBadge.innerText = '⚠️ GGUF Weights Required (Click Download GGUF)';
       }
       if (connBadge) connBadge.innerText = 'Simulation Mode (< 1.5 GB RAM)';
     }
@@ -102,6 +104,25 @@ window.vaporPollProgress = async function() {
   } catch (e) {}
 };
 
+window.vaporRestartServer = async function() {
+  if (confirm('Restart VaporRAM server in-place in the terminal?')) {
+    try {
+      await fetch('/v1/system/restart', {method: 'POST'});
+      alert('Restarting server process... Please wait 2 seconds.');
+      setTimeout(() => { window.location.reload(); }, 2000);
+    } catch (e) { alert('Restart failed: ' + e); }
+  }
+};
+
+window.vaporStopServer = async function() {
+  if (confirm('Stop VaporRAM server process cleanly?')) {
+    try {
+      await fetch('/v1/system/stop', {method: 'POST'});
+      alert('VaporRAM server stopped cleanly.');
+    } catch (e) { alert('Server stopped.'); }
+  }
+};
+
 window.vaporSetModelPath = async function() {
   const inputEl = document.getElementById('model-path-input');
   const path = inputEl ? inputEl.value : '';
@@ -135,7 +156,7 @@ window.vaporScanModels = async function() {
 };
 
 window.vaporDownloadModel = async function() {
-  if (confirm('Start downloading google/gemma-4-E4B-it model weights from Hugging Face?')) {
+  if (confirm('Start downloading official google/gemma-4-E4B_q4_0-it.gguf model from Hugging Face?')) {
     window.vaporProgressHandled = false;
     try {
       const res = await fetch('/v1/system/download_model', {method: 'POST'});
