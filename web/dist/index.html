@@ -22,10 +22,12 @@
 
 
 
-<!-- VaporRAM Model Detection & Connection Bar -->
+
+
+<!-- VaporRAM Top Header Bar & Persistent Controls -->
 <div id="vapor-model-bar" style="position:sticky;top:0;left:0;width:100%;background:#071018;border-bottom:1px solid rgba(6,182,212,0.2);padding:0.4rem 1rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#f9fafb;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;z-index:9999;box-sizing:border-box;">
   <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
-    <span style="font-weight:700;font-size:0.85rem;color:#06b6d4;letter-spacing:0.02em;">💨 VaporRAM v1.0.4</span>
+    <span style="font-weight:700;font-size:0.85rem;color:#06b6d4;letter-spacing:0.02em;">💨 VaporRAM v1.0.5</span>
     <span id="model-status-badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);font-size:0.72rem;padding:0.2rem 0.5rem;border-radius:5px;font-weight:600;">● Weights Loaded (google/gemma-4-E4B-it)</span>
     <span id="model-conn-badge" style="background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);font-size:0.72rem;padding:0.2rem 0.5rem;border-radius:5px;font-weight:600;">NVMe O_DIRECT GGUF Streaming (RAM Ceiling < 1.5 GB)</span>
   </div>
@@ -37,6 +39,25 @@
     <button id="btn-download" onclick="window.vaporDownloadModel()" style="background:linear-gradient(135deg,#06b6d4,#6366f1);color:#fff;border:none;padding:0.28rem 0.75rem;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;">Download GGUF</button>
     <button id="btn-restart-server" onclick="window.vaporRestartServer()" style="background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);padding:0.28rem 0.65rem;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;">🔄 Restart</button>
     <button id="btn-stop-server" onclick="window.vaporStopServer()" style="background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);padding:0.28rem 0.65rem;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;">🛑 Stop Engine</button>
+  </div>
+</div>
+
+<!-- Persistent Active Model & Navigation Subheader Bar -->
+<div id="vapor-persistent-header" style="position:sticky;top:37px;left:0;width:100%;background:#09121c;border-bottom:1px solid rgba(255,255,255,0.1);padding:0.4rem 1.2rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#f9fafb;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;z-index:9998;box-sizing:border-box;">
+  <div style="display:flex;align-items:center;gap:0.75rem;">
+    <div style="font-size:0.65rem;color:#718086;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;">ACTIVE MODEL</div>
+    <div id="active-model-title" style="font-family:monospace;font-size:0.85rem;font-weight:600;color:#38bdf8;">google/gemma-4-E4B-it</div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:0.6rem;">
+    <div style="background:#0d1825;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:2px;display:flex;gap:2px;">
+      <button id="tab-btn-chat" onclick="window.vaporSwitchTab('chat')" style="background:#06b6d4;color:#000;border:none;border-radius:6px;padding:0.22rem 0.75rem;font-size:0.75rem;font-weight:700;cursor:pointer;">💬 Chat</button>
+      <button id="tab-btn-brain" onclick="window.vaporSwitchTab('brain')" style="background:transparent;color:#94a3b8;border:none;border-radius:6px;padding:0.22rem 0.75rem;font-size:0.75rem;font-weight:600;cursor:pointer;">🧠 Brain</button>
+      <button id="tab-btn-profiling" onclick="window.vaporSwitchTab('profiling')" style="background:transparent;color:#94a3b8;border:none;border-radius:6px;padding:0.22rem 0.75rem;font-size:0.75rem;font-weight:600;cursor:pointer;">⚡ Profiling</button>
+    </div>
+
+    <span style="background:rgba(255,255,255,0.06);color:#94a3b8;border:1px solid rgba(255,255,255,0.1);font-size:0.7rem;padding:0.2rem 0.5rem;border-radius:6px;font-family:monospace;">slot 1</span>
+    <button onclick="window.vaporClearChat()" style="background:rgba(239,68,68,0.12);color:#f87171;border:1px solid rgba(239,68,68,0.25);padding:0.22rem 0.65rem;border-radius:6px;font-size:0.75rem;font-weight:600;cursor:pointer;">🗑️ Clear</button>
   </div>
 </div>
 
@@ -53,6 +74,94 @@
 
 <script>
 window.vaporProgressHandled = false;
+
+window.vaporSwitchTab = function(tabName) {
+  ['chat', 'brain', 'profiling'].forEach(t => {
+    const btn = document.getElementById('tab-btn-' + t);
+    if (btn) {
+      if (t === tabName) {
+        btn.style.background = '#06b6d4';
+        btn.style.color = '#000';
+        btn.style.fontWeight = '700';
+      } else {
+        btn.style.background = 'transparent';
+        btn.style.color = '#94a3b8';
+        btn.style.fontWeight = '600';
+      }
+    }
+  });
+
+  const reactTabs = document.querySelectorAll('.view-tabs button');
+  reactTabs.forEach(b => {
+    if (b.innerText.toLowerCase().includes(tabName)) {
+      b.click();
+    }
+  });
+};
+
+window.vaporClearChat = function() {
+  const clearBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Clear') && b.id !== 'vapor-clear-btn');
+  if (clearBtn) clearBtn.click();
+  else window.location.reload();
+};
+
+// Pure Lightweight Markdown HTML Parser
+window.renderVaporMarkdown = function(text) {
+  if (!text) return '';
+  let html = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  // Code blocks ```code```
+  html = html.replace(/```([\s\S]*?)```/g, '<pre style="background:#0a121d;padding:0.75rem;border-radius:8px;overflow-x:auto;border:1px solid rgba(6,182,212,0.25);margin:0.6rem 0;font-family:monospace;font-size:0.85rem;color:#38bdf8;line-height:1.5;"><code>$1</code></pre>');
+
+  // Inline code `code`
+  html = html.replace(/`([^`]+)`/g, '<code style="background:rgba(6,182,212,0.15);color:#38bdf8;padding:0.15rem 0.4rem;border-radius:4px;font-family:monospace;font-size:0.85rem;">$1</code>');
+
+  // Headings ####, ###, ##, #
+  html = html.replace(/^#### (.*$)/gim, '<h4 style="font-size:1.05rem;font-weight:700;color:#06b6d4;margin:1.1rem 0 0.4rem 0;">$1</h4>');
+  html = html.replace(/^### (.*$)/gim, '<h3 style="font-size:1.15rem;font-weight:700;color:#38bdf8;margin:1.3rem 0 0.5rem 0;border-bottom:1px solid rgba(6,182,212,0.2);padding-bottom:0.3rem;">$1</h3>');
+  html = html.replace(/^## (.*$)/gim, '<h2 style="font-size:1.3rem;font-weight:700;color:#f9fafb;margin:1.5rem 0 0.6rem 0;">$1</h2>');
+  html = html.replace(/^# (.*$)/gim, '<h1 style="font-size:1.5rem;font-weight:800;color:#f9fafb;margin:1.7rem 0 0.7rem 0;">$1</h1>');
+
+  // Bold **text**
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong style="font-weight:700;color:#f3f4f6;">$1</strong>');
+
+  // Italics *text*
+  html = html.replace(/\*(.*?)\*/g, '<em style="font-style:italic;color:#e5e7eb;">$1</em>');
+
+  // Horizontal rules ---
+  html = html.replace(/^---$/gim, '<hr style="border:none;border-top:1px solid rgba(255,255,255,0.15);margin:1rem 0;" />');
+
+  // Bullet points * item or - item
+  html = html.replace(/^\s*[\*\-] (.*$)/gim, '<li style="margin-left:1.2rem;margin-bottom:0.3rem;list-style-type:disc;color:#d1d5db;">$1</li>');
+
+  // Numbered lists 1. item
+  html = html.replace(/^\s*(\d+)\. (.*$)/gim, '<li style="margin-left:1.2rem;margin-bottom:0.3rem;list-style-type:decimal;color:#d1d5db;">$2</li>');
+
+  // Wrap adjacent <li> items into <ul> or <ol>
+  html = html.replace(/(<li style="margin-left:1.2rem;margin-bottom:0.3rem;list-style-type:disc;color:#d1d5db;">[\s\S]*?<\/li>\n?)+/g, '<ul style="margin:0.5rem 0;padding-left:0.5rem;">$&</ul>');
+  html = html.replace(/(<li style="margin-left:1.2rem;margin-bottom:0.3rem;list-style-type:decimal;color:#d1d5db;">[\s\S]*?<\/li>\n?)+/g, '<ol style="margin:0.5rem 0;padding-left:0.5rem;">$&</ol>');
+
+  // Paragraph breaks
+  html = html.replace(/\n\n/g, '<div style="margin-bottom:0.8rem;"></div>');
+  html = html.replace(/\n/g, '<br/>');
+
+  return html;
+};
+
+// Automatic Realtime Observer for Parsing Assistant Messages into HTML Markdown
+const mdObserver = new MutationObserver(() => {
+  document.querySelectorAll('.message.assistant .message-body').forEach(el => {
+    const rawText = el.innerText || el.textContent;
+    if (rawText && (el.dataset.rawText !== rawText || !el.dataset.mdParsed)) {
+      el.dataset.rawText = rawText;
+      el.dataset.mdParsed = "true";
+      el.innerHTML = window.renderVaporMarkdown(rawText);
+    }
+  });
+});
 
 window.vaporCheckStatus = async function() {
   try {
@@ -184,8 +293,11 @@ window.addEventListener('DOMContentLoaded', () => {
   window.vaporCheckStatus();
   setInterval(window.vaporCheckStatus, 5000);
   setInterval(window.vaporPollProgress, 800);
+  mdObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
 });
 </script>
+
+
 
 
 

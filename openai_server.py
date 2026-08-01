@@ -7,7 +7,7 @@ WEB_DIST = os.path.join(HERE, "web", "dist")
 ENGINE_BIN = os.path.join(HERE, "c", "vapor_engine")
 DEFAULT_MODEL_DIR = os.path.join(HERE, "models", "gemma-4-E4B-it")
 
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 current_model_path = DEFAULT_MODEL_DIR
 download_progress = {"status": "idle", "percent": 0, "message": "Ready"}
 completed_reset_timer = None
@@ -280,6 +280,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             return self._send_json({"status": "ok", "message": "Downloading official GGUF quantized model (gemma-4-E4B_q4_0-it.gguf) from Hugging Face..."})
 
         stream_mode = payload.get("stream", False)
+        max_tokens = payload.get("max_tokens", 2048)
 
         # Extract prompt based on endpoint
         if any(path.endswith(suffix) for suffix in ("/chat/completions", "/completions", "/responses")):
@@ -292,7 +293,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             return self._send_json({"error": "Not Supported", "message": f"Endpoint {path} not supported"}, status=404)
 
         response_id = f"gen-{int(time.time())}"
-        response_text = self._generate_response(prompt)
+        response_text = self._generate_response(prompt, max_tokens=max_tokens)
 
         profiling_data = {
             "io_wait": 12.4,
@@ -303,7 +304,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             "wall_time_ms": 73.1
         }
 
-        # Real-time SSE Chunked Streaming with explicit connection termination
+        # Real-time SSE Chunked Streaming preserving newlines and space formatting
         if stream_mode:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -313,8 +314,11 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             self.send_header("x-vapor-queue-wait-ms", "0")
             self.end_headers()
 
-            words = response_text.split(" ")
-            for i, w in enumerate(words):
+            # Split into token-sized chunks preserving exact whitespaces and newlines
+            chunks = re.split(r"(\s+)", response_text)
+            for i, chunk_text in enumerate(chunks):
+                if not chunk_text:
+                    continue
                 chunk = {
                     "id": response_id,
                     "object": "chat.completion.chunk",
@@ -324,13 +328,13 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                     "timings": profiling_data,
                     "choices": [{
                         "index": 0,
-                        "delta": {"content": w + (" " if i < len(words)-1 else "")},
+                        "delta": {"content": chunk_text},
                         "finish_reason": None
                     }]
                 }
                 self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode("utf-8"))
                 self.wfile.flush()
-                time.sleep(0.03)
+                time.sleep(0.01)
 
             end_chunk = {
                 "id": response_id,
@@ -377,7 +381,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             }]
         })
 
-    def _generate_response(self, prompt):
+    def _generate_response(self, prompt, max_tokens=2048):
         global llama_model_cache
         # 1. Execute GGUF model using llama-cpp engine
         gguf_file = None
@@ -401,11 +405,11 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
 
                 if gguf_file not in llama_model_cache:
                     sys.stderr.write(f"\033[36m[GGUF Engine] Loading real GGUF model: {gguf_file}\033[0m\n")
-                    llama_model_cache[gguf_file] = Llama(model_path=gguf_file, n_ctx=2048, n_threads=8, verbose=False)
+                    llama_model_cache[gguf_file] = Llama(model_path=gguf_file, n_ctx=4096, n_threads=8, verbose=False)
                 
                 llm = llama_model_cache[gguf_file]
-                formatted_prompt = f"Q: {prompt}\nA:"
-                output = llm(formatted_prompt, max_tokens=256, stop=["Q:", "\n\nQ:"])
+                formatted_prompt = f"User: {prompt}\nAssistant:"
+                output = llm(formatted_prompt, max_tokens=max_tokens, stop=["User:", "<|im_start|>", "<|endoftext|>"])
                 gen_text = output["choices"][0]["text"].strip()
                 if gen_text:
                     return gen_text
@@ -421,7 +425,6 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-        # Strictly GGUF execution (All hardcoded general information text blocks REMOVED)
         return f"[GGUF Engine Output] Processing prompt '{prompt}' via GGUF model weights."
 
 def serve(host="0.0.0.0", port=8000, api_key=None):

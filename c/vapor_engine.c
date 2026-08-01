@@ -47,7 +47,7 @@ void rmsnorm(float *o, const float *x, const float *weight, int size) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "VaporRAM Engine v1.0.4 (Ultra-Low RAM SSD Streaming Engine for Gemma 4 E4B-it)\n");
+        fprintf(stderr, "VaporRAM Engine v1.0.5 (Ultra-Low RAM SSD Streaming Engine for Gemma 4 E4B-it)\n");
         fprintf(stderr, "Usage: %s <model_weights.bin> [prompt]\n", argv[0]);
         return 1;
     }
@@ -55,7 +55,7 @@ int main(int argc, char **argv) {
     const char *model_path = argv[1];
     const char *prompt = (argc >= 3) ? argv[2] : "Hello";
 
-    fprintf(stderr, "=== VaporRAM Engine v1.0.4 ===\n");
+    fprintf(stderr, "=== VaporRAM Engine v1.0.5 ===\n");
     fprintf(stderr, "[Target Model] google/gemma-4-E4B-it\n");
     fprintf(stderr, "[RAM Ceiling ] < 1.5 GB\n");
     fprintf(stderr, "[Streaming IO] O_DIRECT SSD Double-Buffer (140 MB/layer)\n");

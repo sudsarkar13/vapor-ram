@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-VaporRAM — Web UI Brand, Aesthetics, Model Detection, Server Lifecycle & Screen Optimization Transformer
-Replaces old Colibri branding, updates color palette, adds Stop/Restart server buttons, and optimizes screen layout.
+VaporRAM — Web UI Brand, Markdown Renderer, Topbar Fix & Screen Optimization Transformer
+Fixes header bar disappearance on chat initialization, renders rich HTML markdown outputs,
+and optimizes screen layout.
 """
 import os, sys, re
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST_DIR = os.path.join(HERE, "web", "dist")
 
-MODEL_DETECTION_UI_HTML = """
-<!-- VaporRAM Model Detection & Connection Bar -->
+MODEL_DETECTION_UI_HTML = r"""
+<!-- VaporRAM Top Header Bar & Persistent Controls -->
 <div id="vapor-model-bar" style="position:sticky;top:0;left:0;width:100%;background:#071018;border-bottom:1px solid rgba(6,182,212,0.2);padding:0.4rem 1rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#f9fafb;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;z-index:9999;box-sizing:border-box;">
   <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
-    <span style="font-weight:700;font-size:0.85rem;color:#06b6d4;letter-spacing:0.02em;">💨 VaporRAM v1.0.4</span>
+    <span style="font-weight:700;font-size:0.85rem;color:#06b6d4;letter-spacing:0.02em;">💨 VaporRAM v1.0.5</span>
     <span id="model-status-badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);font-size:0.72rem;padding:0.2rem 0.5rem;border-radius:5px;font-weight:600;">● Weights Loaded (google/gemma-4-E4B-it)</span>
     <span id="model-conn-badge" style="background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);font-size:0.72rem;padding:0.2rem 0.5rem;border-radius:5px;font-weight:600;">NVMe O_DIRECT GGUF Streaming (RAM Ceiling < 1.5 GB)</span>
   </div>
@@ -24,6 +25,25 @@ MODEL_DETECTION_UI_HTML = """
     <button id="btn-download" onclick="window.vaporDownloadModel()" style="background:linear-gradient(135deg,#06b6d4,#6366f1);color:#fff;border:none;padding:0.28rem 0.75rem;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;">Download GGUF</button>
     <button id="btn-restart-server" onclick="window.vaporRestartServer()" style="background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3);padding:0.28rem 0.65rem;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;">🔄 Restart</button>
     <button id="btn-stop-server" onclick="window.vaporStopServer()" style="background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);padding:0.28rem 0.65rem;border-radius:5px;font-size:0.75rem;font-weight:600;cursor:pointer;">🛑 Stop Engine</button>
+  </div>
+</div>
+
+<!-- Persistent Active Model & Navigation Subheader Bar -->
+<div id="vapor-persistent-header" style="position:sticky;top:37px;left:0;width:100%;background:#09121c;border-bottom:1px solid rgba(255,255,255,0.1);padding:0.4rem 1.2rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#f9fafb;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;z-index:9998;box-sizing:border-box;">
+  <div style="display:flex;align-items:center;gap:0.75rem;">
+    <div style="font-size:0.65rem;color:#718086;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;">ACTIVE MODEL</div>
+    <div id="active-model-title" style="font-family:monospace;font-size:0.85rem;font-weight:600;color:#38bdf8;">google/gemma-4-E4B-it</div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:0.6rem;">
+    <div style="background:#0d1825;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:2px;display:flex;gap:2px;">
+      <button id="tab-btn-chat" onclick="window.vaporSwitchTab('chat')" style="background:#06b6d4;color:#000;border:none;border-radius:6px;padding:0.22rem 0.75rem;font-size:0.75rem;font-weight:700;cursor:pointer;">💬 Chat</button>
+      <button id="tab-btn-brain" onclick="window.vaporSwitchTab('brain')" style="background:transparent;color:#94a3b8;border:none;border-radius:6px;padding:0.22rem 0.75rem;font-size:0.75rem;font-weight:600;cursor:pointer;">🧠 Brain</button>
+      <button id="tab-btn-profiling" onclick="window.vaporSwitchTab('profiling')" style="background:transparent;color:#94a3b8;border:none;border-radius:6px;padding:0.22rem 0.75rem;font-size:0.75rem;font-weight:600;cursor:pointer;">⚡ Profiling</button>
+    </div>
+
+    <span style="background:rgba(255,255,255,0.06);color:#94a3b8;border:1px solid rgba(255,255,255,0.1);font-size:0.7rem;padding:0.2rem 0.5rem;border-radius:6px;font-family:monospace;">slot 1</span>
+    <button onclick="window.vaporClearChat()" style="background:rgba(239,68,68,0.12);color:#f87171;border:1px solid rgba(239,68,68,0.25);padding:0.22rem 0.65rem;border-radius:6px;font-size:0.75rem;font-weight:600;cursor:pointer;">🗑️ Clear</button>
   </div>
 </div>
 
@@ -40,6 +60,94 @@ MODEL_DETECTION_UI_HTML = """
 
 <script>
 window.vaporProgressHandled = false;
+
+window.vaporSwitchTab = function(tabName) {
+  ['chat', 'brain', 'profiling'].forEach(t => {
+    const btn = document.getElementById('tab-btn-' + t);
+    if (btn) {
+      if (t === tabName) {
+        btn.style.background = '#06b6d4';
+        btn.style.color = '#000';
+        btn.style.fontWeight = '700';
+      } else {
+        btn.style.background = 'transparent';
+        btn.style.color = '#94a3b8';
+        btn.style.fontWeight = '600';
+      }
+    }
+  });
+
+  const reactTabs = document.querySelectorAll('.view-tabs button');
+  reactTabs.forEach(b => {
+    if (b.innerText.toLowerCase().includes(tabName)) {
+      b.click();
+    }
+  });
+};
+
+window.vaporClearChat = function() {
+  const clearBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Clear') && b.id !== 'vapor-clear-btn');
+  if (clearBtn) clearBtn.click();
+  else window.location.reload();
+};
+
+// Pure Lightweight Markdown HTML Parser
+window.renderVaporMarkdown = function(text) {
+  if (!text) return '';
+  let html = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  // Code blocks ```code```
+  html = html.replace(/```([\s\S]*?)```/g, '<pre style="background:#0a121d;padding:0.75rem;border-radius:8px;overflow-x:auto;border:1px solid rgba(6,182,212,0.25);margin:0.6rem 0;font-family:monospace;font-size:0.85rem;color:#38bdf8;line-height:1.5;"><code>$1</code></pre>');
+
+  // Inline code `code`
+  html = html.replace(/`([^`]+)`/g, '<code style="background:rgba(6,182,212,0.15);color:#38bdf8;padding:0.15rem 0.4rem;border-radius:4px;font-family:monospace;font-size:0.85rem;">$1</code>');
+
+  // Headings ####, ###, ##, #
+  html = html.replace(/^#### (.*$)/gim, '<h4 style="font-size:1.05rem;font-weight:700;color:#06b6d4;margin:1.1rem 0 0.4rem 0;">$1</h4>');
+  html = html.replace(/^### (.*$)/gim, '<h3 style="font-size:1.15rem;font-weight:700;color:#38bdf8;margin:1.3rem 0 0.5rem 0;border-bottom:1px solid rgba(6,182,212,0.2);padding-bottom:0.3rem;">$1</h3>');
+  html = html.replace(/^## (.*$)/gim, '<h2 style="font-size:1.3rem;font-weight:700;color:#f9fafb;margin:1.5rem 0 0.6rem 0;">$1</h2>');
+  html = html.replace(/^# (.*$)/gim, '<h1 style="font-size:1.5rem;font-weight:800;color:#f9fafb;margin:1.7rem 0 0.7rem 0;">$1</h1>');
+
+  // Bold **text**
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong style="font-weight:700;color:#f3f4f6;">$1</strong>');
+
+  // Italics *text*
+  html = html.replace(/\*(.*?)\*/g, '<em style="font-style:italic;color:#e5e7eb;">$1</em>');
+
+  // Horizontal rules ---
+  html = html.replace(/^---$/gim, '<hr style="border:none;border-top:1px solid rgba(255,255,255,0.15);margin:1rem 0;" />');
+
+  // Bullet points * item or - item
+  html = html.replace(/^\s*[\*\-] (.*$)/gim, '<li style="margin-left:1.2rem;margin-bottom:0.3rem;list-style-type:disc;color:#d1d5db;">$1</li>');
+
+  // Numbered lists 1. item
+  html = html.replace(/^\s*(\d+)\. (.*$)/gim, '<li style="margin-left:1.2rem;margin-bottom:0.3rem;list-style-type:decimal;color:#d1d5db;">$2</li>');
+
+  // Wrap adjacent <li> items into <ul> or <ol>
+  html = html.replace(/(<li style="margin-left:1.2rem;margin-bottom:0.3rem;list-style-type:disc;color:#d1d5db;">[\s\S]*?<\/li>\n?)+/g, '<ul style="margin:0.5rem 0;padding-left:0.5rem;">$&</ul>');
+  html = html.replace(/(<li style="margin-left:1.2rem;margin-bottom:0.3rem;list-style-type:decimal;color:#d1d5db;">[\s\S]*?<\/li>\n?)+/g, '<ol style="margin:0.5rem 0;padding-left:0.5rem;">$&</ol>');
+
+  // Paragraph breaks
+  html = html.replace(/\n\n/g, '<div style="margin-bottom:0.8rem;"></div>');
+  html = html.replace(/\n/g, '<br/>');
+
+  return html;
+};
+
+// Automatic Realtime Observer for Parsing Assistant Messages into HTML Markdown
+const mdObserver = new MutationObserver(() => {
+  document.querySelectorAll('.message.assistant .message-body').forEach(el => {
+    const rawText = el.innerText || el.textContent;
+    if (rawText && (el.dataset.rawText !== rawText || !el.dataset.mdParsed)) {
+      el.dataset.rawText = rawText;
+      el.dataset.mdParsed = "true";
+      el.innerHTML = window.renderVaporMarkdown(rawText);
+    }
+  });
+});
 
 window.vaporCheckStatus = async function() {
   try {
@@ -145,10 +253,10 @@ window.vaporScanModels = async function() {
   try {
     const res = await fetch('/v1/system/scan');
     const data = await res.json();
-    let msg = "System Model Scan Results:\\n\\n";
+    let msg = "System Model Scan Results:\n\n";
     if (data.scanned_models) {
       data.scanned_models.forEach(function(m) {
-        msg += "- " + m.path + " : " + (m.available ? "AVAILABLE" : "Not Found") + "\\n";
+        msg += "- " + m.path + " : " + (m.available ? "AVAILABLE" : "Not Found") + "\n";
       });
     }
     alert(msg);
@@ -171,9 +279,10 @@ window.addEventListener('DOMContentLoaded', () => {
   window.vaporCheckStatus();
   setInterval(window.vaporCheckStatus, 5000);
   setInterval(window.vaporPollProgress, 800);
+  mdObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
 });
 </script>
-""".replace("\\n", "\\\\n")
+"""
 
 def fix_js_bundle(js_path):
     print(f"[1/3] Processing JS bundle: {os.path.basename(js_path)}")
@@ -213,7 +322,7 @@ def fix_js_bundle(js_path):
     print(" -> JS Bundle Branding Updated ✓")
 
 def fix_css_bundle(css_path):
-    print(f"[2/3] Processing CSS bundle & Adding Laptop Screen Layout Optimization: {os.path.basename(css_path)}")
+    print(f"[2/3] Processing CSS bundle & Adding Layout & Topbar Sticky Rules: {os.path.basename(css_path)}")
     with open(css_path, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -222,7 +331,7 @@ def fix_css_bundle(css_path):
     content = content.replace("#052118", "#071927")
 
     responsive_css = """
-/* VaporRAM Screen Layout Optimization for Laptops & Desktops */
+/* VaporRAM Screen Layout & Sticky Navigation Header Optimization */
 html, body {
   height: 100vh !important;
   max-height: 100vh !important;
@@ -233,8 +342,8 @@ html, body {
 }
 
 #root {
-  height: calc(100vh - 38px) !important;
-  max-height: calc(100vh - 38px) !important;
+  height: calc(100vh - 75px) !important;
+  max-height: calc(100vh - 75px) !important;
   display: flex !important;
   flex-direction: column !important;
   overflow: hidden !important;
@@ -264,6 +373,17 @@ div[class*="messages"], div[class*="chat-messages"] {
   overflow-y: auto !important;
 }
 
+/* Ensure topbar header controls stay permanently visible */
+.topbar, div[class*="topbar"] {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 999 !important;
+  background: #09121c !important;
+}
+
 @media (max-width: 1024px) {
   #root > div {
     flex-direction: row !important;
@@ -285,7 +405,7 @@ div[class*="messages"], div[class*="chat-messages"] {
   }
 }
 """
-    if "VaporRAM Screen Layout Optimization" not in content:
+    if "VaporRAM Screen Layout" not in content:
         content += "\n" + responsive_css
 
     with open(css_path, "w", encoding="utf-8") as f:
@@ -303,12 +423,16 @@ def fix_index_html(html_path):
     if "vapor-model-bar" not in content:
         content = content.replace("<body>", "<body>\n" + MODEL_DETECTION_UI_HTML)
     else:
-        content = re.sub(r"<!-- VaporRAM Model Detection & Connection Bar -->.*?</script>", MODEL_DETECTION_UI_HTML, content, flags=re.DOTALL)
+        # Simple string replacement instead of re.sub
+        start_idx = content.find("<!-- VaporRAM")
+        end_idx = content.find("</script>", start_idx)
+        if start_idx != -1 and end_idx != -1:
+            content = content[:start_idx] + MODEL_DETECTION_UI_HTML + content[end_idx + 9:]
 
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    print(" -> HTML Title & Model Progress Bar UI Updated ✓")
+    print(" -> HTML Title, Persistent Navigation Header & Markdown Observer Updated ✓")
 
 def run():
     print("=== VaporRAM Web UI Transformer ===")

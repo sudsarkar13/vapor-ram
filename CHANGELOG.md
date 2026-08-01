@@ -4,6 +4,15 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 ---
 
+## [v1.0.5] - 2026-08-01
+
+### 🚀 Highlights & Web UI Fixes
+- **Persistent Header Navigation Bar**: Fixed issue where `ACTIVE MODEL`, `Chat / Brain / Profiling` tabs, `slot 1` badge, and `Clear Conversation` button disappeared upon chat initialization. Now permanently pinned and sticky at top.
+- **Realtime HTML Markdown Formatter**: Integrated automatic HTML Markdown observer converting model outputs into formatted headings (`#`, `##`, `###`), bolding (`**`), lists (`*`), code blocks (` ``` `), and paragraph line breaks.
+- **Full Multi-Paragraph Output Generation**: Increased `max_tokens` ceiling from 256 to 2048/4096 and optimized SSE stream formatting to prevent response cutoffs midway.
+
+---
+
 ## [v1.0.4] - 2026-08-01
 
 ### 🚀 Highlights & Automated Features
