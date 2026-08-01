@@ -280,7 +280,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             return self._send_json({"status": "ok", "message": "Downloading official GGUF quantized model (gemma-4-E4B_q4_0-it.gguf) from Hugging Face..."})
 
         stream_mode = payload.get("stream", False)
-        max_tokens = payload.get("max_tokens", 2048)
+        max_tokens = payload.get("max_tokens", 8192)
 
         # Extract prompt based on endpoint
         if any(path.endswith(suffix) for suffix in ("/chat/completions", "/completions", "/responses")):
@@ -381,7 +381,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             }]
         })
 
-    def _generate_response(self, prompt, max_tokens=2048):
+    def _generate_response(self, prompt, max_tokens=8192):
         global llama_model_cache
         # 1. Execute GGUF model using llama-cpp engine
         gguf_file = None
@@ -405,7 +405,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
 
                 if gguf_file not in llama_model_cache:
                     sys.stderr.write(f"\033[36m[GGUF Engine] Loading real GGUF model: {gguf_file}\033[0m\n")
-                    llama_model_cache[gguf_file] = Llama(model_path=gguf_file, n_ctx=4096, n_threads=8, verbose=False)
+                    llama_model_cache[gguf_file] = Llama(model_path=gguf_file, n_ctx=8192, n_threads=8, verbose=False)
                 
                 llm = llama_model_cache[gguf_file]
                 formatted_prompt = f"User: {prompt}\nAssistant:"
