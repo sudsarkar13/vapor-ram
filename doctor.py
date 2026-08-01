@@ -2,14 +2,14 @@
 """
 VaporRAM — Cross-Platform System Diagnostics & Hardware Inspector
 Detects system specs, CPU vector extensions (AVX2/NEON), OS type (Linux & macOS / MacBook),
-and total/available RAM.
+Apple Silicon chipset generations (M1, M2, M3, M4, M5, A18 Pro), and total/available RAM.
 """
 import os, sys, time, platform, subprocess, re, json
 
 def get_macos_cpu_brand():
     try:
         brand = subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"]).decode().strip()
-        if brand:
+        if brand and brand != "0":
             return brand
     except Exception:
         pass
@@ -80,9 +80,9 @@ def run_doctor():
         "detail": os_detail
     })
     
-    # 2. CPU Vector Extension Check (AVX2 for x86_64 / NEON for ARM64)
+    # 2. CPU Vector Extension Check (AVX2 for x86_64 / ARM NEON & AMX for Apple M-Series / A18)
     if arch in ("arm64", "aarch64") or os_name == "Darwin":
-        simd_detail = "ARM NEON + Apple AMX Vector Extensions Enabled"
+        simd_detail = "ARM NEON + Apple AMX Matrix Extensions Enabled"
         simd_ok = True
     else:
         try:
