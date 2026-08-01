@@ -392,7 +392,13 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
 
         if gguf_file and os.path.exists(gguf_file):
             try:
-                from llama_cpp import Llama
+                try:
+                    from llama_cpp import Llama
+                except ImportError:
+                    sys.stderr.write("\033[36m[VaporRAM Auto-Setup] Installing llama-cpp-python GGUF engine...\033[0m\n")
+                    subprocess.check_call([sys.executable, "-m", "pip", "install", "--break-system-packages", "llama-cpp-python"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    from llama_cpp import Llama
+
                 if gguf_file not in llama_model_cache:
                     sys.stderr.write(f"\033[36m[GGUF Engine] Loading real GGUF model: {gguf_file}\033[0m\n")
                     llama_model_cache[gguf_file] = Llama(model_path=gguf_file, n_ctx=2048, n_threads=8, verbose=False)

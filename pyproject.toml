@@ -18,6 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=1.20.0",
+    "llama-cpp-python>=0.2.0"
 ]
 
 [project.scripts]

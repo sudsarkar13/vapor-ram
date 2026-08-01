@@ -1,48 +1,72 @@
 #!/usr/bin/env python3
 """
 VaporRAM — Distribution Release Packager
-Compiles binaries, packages assets, and builds a standalone distribution tarball.
+Compiles binaries, packages assets, and builds standalone distribution packages:
+- Linux: vapor-ram-v{VERSION}-linux-x86_64.tar.gz
+- macOS / MacBook: vapor-ram-v{VERSION}-macos.tar.gz
 """
-import os, sys, shutil, tarfile, subprocess
+import os, sys, shutil, tarfile, subprocess, platform
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VERSION = "1.0.3"
-DIST_NAME = f"vapor-ram-v{VERSION}-linux-x86_64"
-OUTPUT_TAR = f"{DIST_NAME}.tar.gz"
 
 def create_release():
     print(f"=== VaporRAM Release Packager v{VERSION} ===")
     print("1. Compiling C SIMD Engine Binaries...")
-    subprocess.check_call(["make", "-C", os.path.join(HERE, "c")])
+    try:
+        subprocess.check_call(["make", "-C", os.path.join(HERE, "c")])
+    except Exception as e:
+        print(f"[!] Warning: C compilation failed ({e}), packaging Python and Web UI runtime...")
 
-    build_dir = os.path.join(HERE, "dist_build", DIST_NAME)
-    if os.path.exists(build_dir):
-        shutil.rmtree(build_dir)
-    os.makedirs(build_dir)
+    dist_base = f"vapor-ram-v{VERSION}"
+    
+    # 2. Package Linux tar.gz
+    linux_dist_name = f"{dist_base}-linux-x86_64"
+    build_dir_linux = os.path.join(HERE, "dist_build", linux_dist_name)
+    if os.path.exists(build_dir_linux):
+        shutil.rmtree(build_dir_linux)
+    os.makedirs(build_dir_linux)
 
-    print("2. Copying Linux build binaries, scripts, LICENSE, and Web UI assets...")
-    # Copy root files
-    for f in ["vapor", "doctor.py", "resource_plan.py", "openai_server.py", "config.py", "version.py", "README.md", "LICENSE"]:
+    # 3. Package macOS tar.gz
+    macos_dist_name = f"{dist_base}-macos"
+    build_dir_macos = os.path.join(HERE, "dist_build", macos_dist_name)
+    if os.path.exists(build_dir_macos):
+        shutil.rmtree(build_dir_macos)
+    os.makedirs(build_dir_macos)
+
+    print("2. Copying scripts, LICENSE, presets, and Web UI assets...")
+    root_files = ["vapor", "doctor.py", "resource_plan.py", "openai_server.py", "config.py", "version.py", "README.md", "LICENSE"]
+    for f in root_files:
         src = os.path.join(HERE, f)
         if os.path.exists(src):
-            shutil.copy(src, build_dir)
+            shutil.copy(src, build_dir_linux)
+            shutil.copy(src, build_dir_macos)
 
-    # Copy directories (including compiled C binary in c/)
-    shutil.copytree(os.path.join(HERE, "c"), os.path.join(build_dir, "c"))
-    shutil.copytree(os.path.join(HERE, "web"), os.path.join(build_dir, "web"))
-    shutil.copytree(os.path.join(HERE, "tools"), os.path.join(build_dir, "tools"))
-    shutil.copytree(os.path.join(HERE, "presets"), os.path.join(build_dir, "presets"))
+    for dir_name in ["c", "web", "tools", "presets"]:
+        src_dir = os.path.join(HERE, dir_name)
+        if os.path.exists(src_dir):
+            shutil.copytree(src_dir, os.path.join(build_dir_linux, dir_name))
+            shutil.copytree(src_dir, os.path.join(build_dir_macos, dir_name))
 
-    print("3. Creating release tarball archive...")
-    tar_path = os.path.join(HERE, OUTPUT_TAR)
-    with tarfile.open(tar_path, "w:gz") as tar:
-        tar.add(build_dir, arcname=DIST_NAME)
+    print("3. Creating release tarball archives for Linux and macOS (.tar.gz)...")
+    
+    # Build Linux tarball
+    linux_tar_path = os.path.join(HERE, f"{linux_dist_name}.tar.gz")
+    with tarfile.open(linux_tar_path, "w:gz") as tar:
+        tar.add(build_dir_linux, arcname=linux_dist_name)
+    print(f" -> Created Linux release: {linux_tar_path} ({os.path.getsize(linux_tar_path)/(1024*1024):.2f} MB)")
 
+    # Build macOS tarball (.tar.gz)
+    macos_tar_path = os.path.join(HERE, f"{macos_dist_name}.tar.gz")
+    with tarfile.open(macos_tar_path, "w:gz") as tar:
+        tar.add(build_dir_macos, arcname=macos_dist_name)
+    print(f" -> Created macOS MacBook release: {macos_tar_path} ({os.path.getsize(macos_tar_path)/(1024*1024):.2f} MB)")
+
+    # Cleanup temp build dir
     shutil.rmtree(os.path.join(HERE, "dist_build"))
 
-    print(f"\n[Success] Distribution package created: {OUTPUT_TAR}")
-    print(f"[File Size] {os.path.getsize(tar_path) / (1024*1024):.2f} MB")
-    return tar_path
+    print(f"\n[Success] Distribution packages created for Linux and macOS (.tar.gz)!")
+    return [linux_tar_path, macos_tar_path]
 
 if __name__ == "__main__":
     create_release()

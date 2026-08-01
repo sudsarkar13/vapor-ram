@@ -26,7 +26,8 @@ setup(
         "": ["c/vapor_engine", "web/dist/*", "web/dist/assets/*"]
     },
     install_requires=[
-        "numpy>=1.20.0"
+        "numpy>=1.20.0",
+        "llama-cpp-python>=0.2.0"
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
