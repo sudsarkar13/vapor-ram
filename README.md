@@ -3,6 +3,7 @@
 **VaporRAM** is a lightweight, zero-dependency inference engine written in **pure C**. It is specifically engineered to run **google/gemma-4-E4B-it (8-billion parameter state-of-the-art model)** on consumer hardware under a strict **1.5 GB RAM ceiling** by streaming layers directly from NVMe SSD storage into RAM.
 
 [![PyPI version](https://img.shields.io/pypi/v/vapor-ram.svg)](https://pypi.org/project/vapor-ram/)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/vapor-ram?color=06b6d4&style=flat-square)](https://pypi.org/project/vapor-ram/)
 [![Docs](https://img.shields.io/badge/Docs-Live-cyan.svg)](https://sudsarkar13.github.io/vapor-ram/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![RAM Ceiling](https://img.shields.io/badge/RAM_Ceiling-%3C_1.5_GB-brightgreen.svg)](#hardware--system-requirements)

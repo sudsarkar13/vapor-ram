@@ -155,17 +155,27 @@ def main():
         if args.preset:
             p_file = os.path.join(PRESETS_DIR, f"{args.preset}.json")
             if os.path.exists(p_file):
-                p_data = json.load(open(p_file))
-                prompt_str = f"{p_data.get('system_instruction', '')}\nUser: {prompt_str}"
-        dummy_bin = os.path.join(HERE, "c", "vapor_engine.o")
-        subprocess.call([ENGINE_BIN, dummy_bin, prompt_str])
+                try:
+                    p_data = json.load(open(p_file))
+                    prompt_str = f"{p_data.get('system_instruction', '')}\nUser: {prompt_str}"
+                except Exception:
+                    pass
+        import openai_server
+        model_dir = os.path.join(HERE, "models", "gemma-4-E4B-it")
+        openai_server.current_model_path = model_dir
+        handler = openai_server.VaporRequestHandler.__new__(openai_server.VaporRequestHandler)
+        response_text = handler._generate_response(prompt_str)
+        print(f"\033[1;36m[VaporRAM Output]\033[0m\n{response_text}\n")
 
     elif args.command == "chat":
         print("\033[1;36m=== VaporRAM Interactive Terminal Chat ===\033[0m")
         preset_name = args.preset or "default"
         print(f" Model Target: \033[1;33mgoogle/gemma-4-E4B-it\033[0m | Preset: \033[1;35m{preset_name}\033[0m | RAM Ceiling: \033[1;32m< 1.5 GB\033[0m")
         print(" Commands    : \033[1;30m/stats, /presets, /clear, /exit\033[0m\n")
-        dummy_bin = os.path.join(HERE, "c", "vapor_engine.o")
+        import openai_server
+        model_dir = os.path.join(HERE, "models", "gemma-4-E4B-it")
+        openai_server.current_model_path = model_dir
+        handler = openai_server.VaporRequestHandler.__new__(openai_server.VaporRequestHandler)
         while True:
             try:
                 user_input = input("\033[1;32mVaporUser > \033[0m")
@@ -185,7 +195,8 @@ def main():
                     os.system("clear")
                     continue
                 
-                subprocess.call([ENGINE_BIN, dummy_bin, cmd])
+                resp = handler._generate_response(cmd)
+                print(f"\033[1;36mVaporRAM >\033[0m {resp}\n")
             except KeyboardInterrupt:
                 print("\nSession interrupted.")
                 break
