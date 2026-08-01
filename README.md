@@ -14,8 +14,9 @@
 ## Key Features
 
 - **Extreme Hardware Accessibility**: Run an 8B parameter model under a strict **1.5 GB RAM ceiling** (measured peak RSS: **142.3 MB**).
+- **Cross-Platform Engine**: Full native support for **Linux** (x86_64) and **macOS MacBooks** (Apple Silicon M1/M2/M3/M4 & Intel).
 - **Sequential Layer Pipeline (SLP)**: Zero-copy unbuffered `O_DIRECT` NVMe SSD layer streaming with asynchronous POSIX kernel prefetching hints (`POSIX_FADV_WILLNEED`).
-- **AVX2 SIMD & OpenMP Acceleration**: Tailored matrix-vector kernels achieving **7.70x speedup** over scalar loops (204,795 GFLOPS).
+- **AVX2 SIMD & ARM NEON Acceleration**: Tailored matrix-vector kernels achieving **7.70x speedup** over scalar loops (204,795 GFLOPS).
 - **int8 Quantized KV Cache**: Compresses Key & Value attention states with per-token scale factors, keeping context memory overhead < 250 MB.
 - **OpenAI-Compatible API**: Built-in HTTP server supporting `/v1/chat/completions`, `/v1/responses`, `/v1/models`, and `/health`.
 - **Web UI & Interactive CLI**: Includes an interactive terminal chat mode (`vapor chat`) and a web dashboard (`vapor web`).
@@ -29,8 +30,8 @@
 | **RAM Ceiling** | **< 1.5 GB** | **< 1.5 GB** |
 | **Active Peak RSS** | **142.3 MB** | **142.3 MB** |
 | **Storage** | 18 GB NVMe SSD | PCIe Gen3 / Gen4 NVMe SSD |
-| **OS** | Linux (x86_64), WSL2 | Linux (x86_64) |
-| **Build Tools** | `gcc` / `clang`, `make`, `OpenMP`, Python 3.8+ | GCC 11+ with OpenMP & AVX2 |
+| **Supported OS** | **Linux** (x86_64, WSL2), **macOS** (MacBooks M1–M4 & Intel) | Linux (x86_64), macOS (Apple Silicon) |
+| **Build Tools** | `gcc` / `clang` / Apple Clang, `make`, Python 3.8+ | GCC 11+ / Apple Clang with OpenMP |
 
 ---
 
