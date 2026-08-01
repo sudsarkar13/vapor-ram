@@ -12,6 +12,7 @@ current_model_path = DEFAULT_MODEL_DIR
 download_progress = {"status": "idle", "percent": 0, "message": "Ready"}
 completed_reset_timer = None
 server_instance = None
+llama_model_cache = {}
 
 def reset_progress_idle():
     global download_progress
@@ -377,6 +378,35 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         })
 
     def _generate_response(self, prompt):
+        global llama_model_cache
+        # 1. Try real GGUF model execution using llama-cpp engine
+        gguf_file = None
+        if os.path.exists(current_model_path):
+            if os.path.isfile(current_model_path) and current_model_path.endswith(".gguf"):
+                gguf_file = current_model_path
+            elif os.path.isdir(current_model_path):
+                for f in os.listdir(current_model_path):
+                    if f.endswith(".gguf"):
+                        gguf_file = os.path.join(current_model_path, f)
+                        break
+
+        if gguf_file and os.path.exists(gguf_file):
+            try:
+                from llama_cpp import Llama
+                if gguf_file not in llama_model_cache:
+                    sys.stderr.write(f"\033[36m[GGUF Engine] Loading real GGUF model: {gguf_file}\033[0m\n")
+                    llama_model_cache[gguf_file] = Llama(model_path=gguf_file, n_ctx=2048, n_threads=8, verbose=False)
+                
+                llm = llama_model_cache[gguf_file]
+                formatted_prompt = f"Q: {prompt}\nA:"
+                output = llm(formatted_prompt, max_tokens=256, stop=["Q:", "\n\nQ:"])
+                gen_text = output["choices"][0]["text"].strip()
+                if gen_text:
+                    return gen_text
+            except Exception as e:
+                sys.stderr.write(f"\033[33m[GGUF Engine] Real GGUF execution fallback: {e}\033[0m\n")
+
+        # 2. Try C Binary execution streamer
         if os.path.exists(current_model_path) and os.path.exists(ENGINE_BIN):
             try:
                 raw_output = subprocess.check_output([ENGINE_BIN, current_model_path, prompt], stderr=subprocess.DEVNULL).decode("utf-8").strip()
