@@ -1,9 +1,11 @@
 ---
 name: release-manager
-description: Standard operating procedure for version bumping, Web UI asset transformation, C engine compilation, standalone Linux packaging, GitHub Release tagging with binary attachments, PyPI distribution publishing, and GitHub Pages documentation synchronization.
+description: Standard operating procedure for version bumping, Web UI asset transformation, C engine compilation, binary staging, GitHub Release tagging with OS binary attachments, PyPI distribution publishing, and GitHub Pages synchronization. ONLY activate this skill when the user explicitly requests or initiates a new version release or version bump.
 ---
 
 # Release Manager Skill
+
+> **IMPORTANT ACTIVATION RULE**: This skill MUST ONLY be activated when the maintainer explicitly requests or initiates a new version release, release update, or version bump from their side. Do NOT auto-trigger this skill for minor edits or routine bug fixes.
 
 This skill defines the mandatory, step-by-step workflow for cutting new version releases for **VaporRAM** across Git, GitHub Releases, PyPI packages, and GitHub Pages.
 
@@ -12,7 +14,7 @@ This skill defines the mandatory, step-by-step workflow for cutting new version 
 ## 📋 Standard Operating Procedure (SOP)
 
 ### 1. Version Bumping Across All Manifests
-Update the target version string `X.Y.Z` consistently in all 10 target files:
+Update the target version string `X.Y.Z` consistently in all 10 target manifest files:
 
 - `version.py`: `__version__ = "X.Y.Z"`
 - `setup.py`: `version="X.Y.Z"`
@@ -49,13 +51,16 @@ python3 tests/test_engine.py
 
 ---
 
-### 4. Build Standalone Linux Release Tarball
-Package standalone binary archive attachment for Ubuntu / Debian / Fedora / Arch distributions:
+### 4. Build Standalone OS Release Archives (Linux & macOS)
+Package standalone binary archives for Ubuntu/Debian/Fedora/Arch Linux and macOS MacBooks:
 
 ```bash
 python3 tools/package_release.py
-# Output generated: vapor-ram-vX.Y.Z-linux-x86_64.tar.gz
+# Output generated:
+# - vapor-ram-vX.Y.Z-linux-x86_64.tar.gz
+# - vapor-ram-vX.Y.Z-macos.tar.gz
 ```
+*Note: OS distribution tarballs (`vapor-ram-v*.tar.gz`) are attached directly to the GitHub Release via `gh release create`. They are ignored by Git and must NOT be committed to the repository.*
 
 ---
 
@@ -71,12 +76,12 @@ python3 setup.py sdist bdist_wheel
 
 ---
 
-### 6. Git Commit, Tagging, and GitHub Release Publishing
-Commit modified source files, create annotated release tag, push to main, and publish GitHub Release with standalone Linux archive attached:
+### 6. Git Commit (Including C Binary), Tagging, and GitHub Release Publishing
+Commit modified source files **AND the compiled `c/vapor_engine` binary**, create annotated release tag, push to main, and publish GitHub Release with OS binary attachments:
 
 ```bash
-# 1. Stage and commit source files
-git add version.py setup.py pyproject.toml openai_server.py vapor c/vapor_engine.c tools/package_release.py tools/fix_webui.py web/ CHANGELOG.md
+# 1. Stage source files AND compiled c/vapor_engine binary
+git add version.py setup.py pyproject.toml openai_server.py vapor c/vapor_engine c/vapor_engine.c tools/package_release.py tools/fix_webui.py web/ CHANGELOG.md .gitignore
 git commit -m "Release vX.Y.Z: <Highlights Summary>"
 
 # 2. Push main branch
@@ -84,11 +89,11 @@ TOKEN=$(gh auth token)
 git push https://sudsarkar13:${TOKEN}@github.com/sudsarkar13/vapor-ram.git main
 
 # 3. Create & push tag
-git tag -a vX.Y.Z -m "vX.Y.Z Release — Standalone Linux Build"
+git tag -a vX.Y.Z -m "vX.Y.Z Release — Standalone OS Builds"
 git push https://sudsarkar13:${TOKEN}@github.com/sudsarkar13/vapor-ram.git vX.Y.Z
 
-# 4. Create GitHub release with standalone Linux tarball attached
-gh release create vX.Y.Z vapor-ram-vX.Y.Z-linux-x86_64.tar.gz \
+# 4. Create GitHub release with standalone Linux & macOS tarball attachments
+gh release create vX.Y.Z vapor-ram-vX.Y.Z-linux-x86_64.tar.gz vapor-ram-vX.Y.Z-macos.tar.gz \
   --title "vX.Y.Z — <Title>" \
   --notes-file CHANGELOG.md \
   --repo sudsarkar13/vapor-ram
