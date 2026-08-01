@@ -2,17 +2,17 @@
 """
 VaporRAM — GGUF Hugging Face Model Downloader for google/gemma-4-E4B-it
 Downloads official GGUF quantized model file directly from Hugging Face:
-- Repo: google/gemma-4-E4B-it-qat-q4_0-gguf
-- File: gemma-4-E4B_q4_0-it.gguf (~2.5 GB - 4.5 GB)
+- Repo: unsloth/gemma-4-E4B-it-GGUF
+- File: gemma-4-E4B-it-Q4_K_M.gguf (~2.5 GB - 4.5 GB)
 """
 import os, sys, json, time, urllib.request
 
-PRIMARY_GGUF_URL = "https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/resolve/main/gemma-4-E4B_q4_0-it.gguf"
-FALLBACK_GGUF_URL = "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf"
+PRIMARY_GGUF_URL = "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf"
+FALLBACK_GGUF_URL = "https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/resolve/main/gemma-4-E4B_q4_0-it.gguf"
 CONFIG_URL = "https://huggingface.co/google/gemma-4-E4B-it/resolve/main/config.json"
 
 TARGET_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "gemma-4-E4B-it")
-TARGET_GGUF_PATH = os.path.join(TARGET_DIR, "gemma-4-E4B_q4_0-it.gguf")
+TARGET_GGUF_PATH = os.path.join(TARGET_DIR, "gemma-4-E4B-it-Q4_K_M.gguf")
 TARGET_CONFIG_PATH = os.path.join(TARGET_DIR, "config.json")
 
 def download_file_with_progress(url, target_path, label="GGUF Model", progress_callback=None):
@@ -65,18 +65,13 @@ def run_full_download(progress_callback=None):
     # 2. Download GGUF Model file if not present
     if not os.path.exists(TARGET_GGUF_PATH):
         try:
-            download_file_with_progress(PRIMARY_GGUF_URL, TARGET_GGUF_PATH, "gemma-4-E4B_q4_0-it.gguf", progress_callback)
+            download_file_with_progress(PRIMARY_GGUF_URL, TARGET_GGUF_PATH, "gemma-4-E4B-it-Q4_K_M.gguf", progress_callback)
         except Exception as e:
             print(f"[!] Primary GGUF download failed ({e}). Trying fallback URL...")
             try:
-                download_file_with_progress(FALLBACK_GGUF_URL, TARGET_GGUF_PATH, "gemma-4-E4B-it-Q4_K_M.gguf", progress_callback)
+                download_file_with_progress(FALLBACK_GGUF_URL, TARGET_GGUF_PATH, "gemma-4-E4B_q4_0-it.gguf", progress_callback)
             except Exception as e2:
                 print(f"[!] Fallback GGUF download error: {e2}")
-                # Create 4096-byte aligned GGUF fallback structure for local engine
-                if progress_callback:
-                    progress_callback(90, "Creating 4096-byte O_DIRECT aligned GGUF model container...")
-                with open(TARGET_GGUF_PATH, "wb") as f:
-                    f.write(b"GGUF\x03\x00\x00\x00" + b"\x00" * (1024 * 1024 * 10))
 
     if progress_callback:
         progress_callback(100, f"Installation Complete! GGUF model ready at {TARGET_GGUF_PATH}")
