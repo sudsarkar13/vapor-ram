@@ -4,6 +4,15 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 ---
 
+## [v1.0.7-alpha.1] - 2026-08-02
+
+### 🚀 Highlights & Features
+- **Next.js + shadcn/ui Dashboard Migration**: Completely modernized the Web UI with Next.js, Tailwind CSS, and shadcn/ui featuring real-time SSE streaming, `react-markdown` syntax highlighting, and 0 end-user Node.js dependencies.
+- **Dynamic Context Window (`/system/context`)**: Added runtime context adjustment endpoint to dynamically scale `n_ctx` (512 to 8192 tokens) with automatic KV cache re-allocation.
+- **Concurrent Slot Guarding & Broken Pipe Handling**: Introduced slot locks (`_slot_begin` / `_slot_end`) and graceful `BrokenPipeError` handling when client connections abort.
+
+---
+
 ## [v1.0.6] - 2026-08-01
 
 ### 🚀 Highlights & Features

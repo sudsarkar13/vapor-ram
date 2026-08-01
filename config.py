@@ -10,6 +10,7 @@ DEFAULT_CONFIG = {
     "model_dir": "./models/gemma-4-E4B-it",
     "ram_ceiling_gb": 1.5,
     "max_seq_len": 2048,
+    "n_ctx": 8192,
     "host": "0.0.0.0",
     "port": 8000,
     "api_key": None,

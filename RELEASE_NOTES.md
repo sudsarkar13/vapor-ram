@@ -1,14 +1,14 @@
-# v1.0.6 — Stable Release
+# v1.0.7-alpha.1 — Alpha Release
 
-## 🔄 What's Changed (v1.0.5 ➔ v1.0.6)
-- **Channel**: Stable Release
+## 🔄 What's Changed (v1.0.6 ➔ v1.0.7-alpha.1)
+- **Channel**: Alpha Release (Preview Channel)
 - **Target Model**: `google/gemma-4-E4B-it` (GGUF, RAM Ceiling < 1.5 GB)
 
-### 🐛 Fixed Bugs & Issues
-- **Linux Terminal Signal Shutdown (`CTRL+C`)**: Resolved socket polling and signal handling in `openai_server.py` so pressing `CTRL+C` in Linux terminals cleanly force-terminates the server process without hanging.
-- **Output Token Truncation**: Expanded token generation ceiling from `2048` to **`8192` tokens** (`max_tokens=8192` & `n_ctx=8192`) to prevent long answers from cutting off midway.
-- **`vapor run` GGUF Model Execution**: Fixed `./vapor run` and `./vapor chat` commands to route directly through the GGUF model execution engine.
-
 ### ✨ New Features & Enhancements
-- **Cross-Platform `doctor` Inspector**: Added native macOS MacBook hardware identification (detecting Apple Silicon M1 through M5 series & A18 Pro) and ARM NEON / AMX matrix extension detection alongside Linux AVX2 SIMD checks.
-- **Release Manager SOP Refactor**: Standardized semantic release channel naming (`Stable`, `Beta`, `Alpha`), version-specific release notes comparison, git tracking of compiled C binaries, and PyPI virtual environment upload commands.
+- **Next.js + shadcn/ui Dashboard**: Rebuilt the Web UI using Next.js, TypeScript, Tailwind CSS, and shadcn/ui featuring real-time SSE streaming, `react-markdown` code highlighting, memory telemetry gauge, and zero end-user Node.js dependencies.
+- **Dynamic Context Adjustment (`/system/context`)**: Added runtime endpoint to dynamically scale context length (`n_ctx`) between 512 and 8,192 tokens with automatic KV cache re-allocation.
+- **Concurrent Slot Guarding & Connection Resilience**: Added slot locks (`_slot_begin` / `_slot_end`) and graceful `BrokenPipeError` / `ConnectionResetError` handling when client SSE streams disconnect.
+
+### 🐛 Fixed Bugs & Issues
+- **SSE Stream Abort Handling**: Server cleanly halts token iteration when the browser disconnects or navigates away.
+- **Config Persistence**: Fixed settings synchronization in `config.py` for persistent user options.

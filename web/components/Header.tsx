@@ -1,115 +1,133 @@
 "use client";
 
 import React from "react";
-import { MessageSquare, Cpu, Activity, Terminal, Trash2, Zap, Database } from "lucide-react";
+import {
+	MessageSquare,
+	Cpu,
+	Activity,
+	Terminal,
+	Trash2,
+	Zap,
+	Layers,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 export type ActiveTab = "chat" | "brain" | "profiling" | "doctor";
 
-interface HeaderProps {
-  activeTab: ActiveTab;
-  setActiveTab: (tab: ActiveTab) => void;
-  onClearChat: () => void;
-  isOnline: boolean;
-  activeModel: string;
+export interface VaporSlots {
+	active: number;
+	total: number;
 }
 
-export function Header({ activeTab, setActiveTab, onClearChat, isOnline, activeModel }: HeaderProps) {
-  return (
-    <header className="sticky top-0 z-50 w-full border-b border-cyan-500/20 bg-slate-950/90 backdrop-blur-md px-4 py-2.5 transition-all">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        {/* Left Section: Brand & Engine Specs */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          <div className="flex items-center gap-2">
-            <span className="text-lg font-extrabold tracking-tight text-cyan-400 flex items-center gap-1.5">
-              <Zap className="h-5 w-5 fill-cyan-400/20 text-cyan-400 animate-pulse" />
-              VaporRAM
-              <span className="text-xs font-semibold text-cyan-500/80 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-500/30">
-                v1.0.6
-              </span>
-            </span>
-          </div>
+interface HeaderProps {
+	activeTab: ActiveTab;
+	setActiveTab: (tab: ActiveTab) => void;
+	onClearChat: () => void;
+	isOnline: boolean;
+	activeModel: string;
+	slots?: VaporSlots;
+}
 
-          <Badge variant="outline" className={isOnline ? "bg-emerald-950/50 text-emerald-400 border-emerald-500/30 text-xs font-medium" : "bg-amber-950/50 text-amber-400 border-amber-500/30 text-xs font-medium"}>
-            <span className={`mr-1.5 inline-block h-2 w-2 rounded-full ${isOnline ? "bg-emerald-400 animate-ping" : "bg-amber-400"}`} />
-            {isOnline ? `● Weights Loaded (${activeModel})` : "○ Engine Offline"}
-          </Badge>
+const TABS: { id: ActiveTab; label: string; Icon: typeof MessageSquare }[] = [
+	{ id: "chat", label: "Chat", Icon: MessageSquare },
+	{ id: "brain", label: "Brain Cortex", Icon: Cpu },
+	{ id: "profiling", label: "Profiling", Icon: Activity },
+	{ id: "doctor", label: "Doctor", Icon: Terminal },
+];
 
-          <Badge variant="outline" className="hidden lg:inline-flex bg-slate-900 text-slate-300 border-slate-700/60 text-xs font-normal">
-            <Database className="mr-1 h-3.5 w-3.5 text-indigo-400" />
-            NVMe O_DIRECT GGUF Streaming (RAM &lt; 1.5 GB Ceiling)
-          </Badge>
-        </div>
+export function Header({
+	activeTab,
+	setActiveTab,
+	onClearChat,
+	isOnline,
+	activeModel,
+	slots,
+}: HeaderProps) {
+	return (
+		<header className="sticky top-0 z-50 w-full border-b border-cyan-500/20 bg-slate-950/90 backdrop-blur-md">
+			<div className="flex h-11 items-center gap-3 px-3">
+				{/* Brand */}
+				<div className="flex shrink-0 items-center gap-1.5">
+					<Zap className="h-4 w-4 fill-cyan-400/20 text-cyan-400 animate-pulse" />
+					<span className="text-sm font-extrabold tracking-tight text-cyan-400">
+						VaporRAM
+					</span>
+					<Badge
+						variant="outline"
+						className="h-5 px-1.5 text-[10px] font-mono font-semibold uppercase tracking-wider text-cyan-400/90 border-cyan-500/40 bg-cyan-950/60">
+						v1.0.6
+					</Badge>
+				</div>
 
-        {/* Center Section: Navigation View Tabs */}
-        <div className="flex items-center gap-1 bg-slate-900/80 p-1 rounded-lg border border-slate-800">
-          <button
-            onClick={() => setActiveTab("chat")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-              activeTab === "chat"
-                ? "bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
-            }`}
-          >
-            <MessageSquare className="h-3.5 w-3.5" />
-            Chat
-          </button>
+				<div className="h-5 w-px bg-slate-800" />
 
-          <button
-            onClick={() => setActiveTab("brain")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-              activeTab === "brain"
-                ? "bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
-            }`}
-          >
-            <Cpu className="h-3.5 w-3.5" />
-            Brain Cortex
-          </button>
+				{/* Status */}
+				<Badge
+					variant="outline"
+					className={`h-6 shrink-0 gap-1.5 px-2 text-[11px] font-medium ${
+						isOnline ?
+							"bg-emerald-950/40 text-emerald-400 border-emerald-500/30"
+						:	"bg-amber-950/40 text-amber-400 border-amber-500/30"
+					}`}>
+					<span className="relative inline-flex h-1.5 w-1.5">
+						{isOnline && (
+							<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+						)}
+						<span
+							className={`relative inline-flex h-1.5 w-1.5 rounded-full ${isOnline ? "bg-emerald-400" : "bg-amber-400"}`}
+						/>
+					</span>
+					<span className="truncate max-w-[180px]">
+						{isOnline ? activeModel : "Engine Offline"}
+					</span>
+				</Badge>
 
-          <button
-            onClick={() => setActiveTab("profiling")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-              activeTab === "profiling"
-                ? "bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
-            }`}
-          >
-            <Activity className="h-3.5 w-3.5" />
-            Profiling
-          </button>
+				<div className="flex-1" />
 
-          <button
-            onClick={() => setActiveTab("doctor")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-              activeTab === "doctor"
-                ? "bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
-            }`}
-          >
-            <Terminal className="h-3.5 w-3.5" />
-            Doctor
-          </button>
-        </div>
+				{/* Tabs */}
+				<div className="flex shrink-0 items-center gap-0.5 rounded-md bg-slate-900/80 p-0.5 border border-slate-800">
+					{TABS.map(({ id, label, Icon }) => {
+						const active = activeTab === id;
+						return (
+							<button
+								key={id}
+								onClick={() => setActiveTab(id)}
+								className={`flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-[11px] font-semibold transition-all ${
+									active ?
+										"bg-cyan-500 text-slate-950 shadow-sm shadow-cyan-500/30"
+									:	"text-slate-400 hover:text-slate-100 hover:bg-slate-800/70"
+								}`}>
+								<Icon className="h-3.5 w-3.5" />
+								<span className="hidden sm:inline">{label}</span>
+							</button>
+						);
+					})}
+				</div>
 
-        {/* Right Section: Slot Badge & Clear Button */}
-        <div className="flex items-center gap-2">
-          <Badge className="bg-cyan-950/80 text-cyan-300 border border-cyan-500/30 text-xs font-mono font-medium">
-            slot 1
-          </Badge>
-          
-          <Button
-            onClick={onClearChat}
-            variant="outline"
-            size="sm"
-            className="h-8 px-2.5 bg-slate-900 border-red-500/30 text-red-400 hover:bg-red-950/40 hover:text-red-300 hover:border-red-500/50 text-xs font-medium transition-all"
-          >
-            <Trash2 className="h-3.5 w-3.5 mr-1" />
-            Clear
-          </Button>
-        </div>
-      </div>
-    </header>
-  );
+				{/* Right actions */}
+				<div className="flex shrink-0 items-center gap-1.5">
+					<Badge
+						variant="outline"
+						title="Active KV-cache slots reserved for the live chat session"
+						className={`h-6 gap-1.5 px-2 text-[10px] font-mono uppercase tracking-wider ${
+							slots && slots.active > 0 ?
+								"text-emerald-300/90 bg-emerald-950/40 border-emerald-500/30"
+							:	"text-cyan-300/90 bg-cyan-950/40 border-cyan-500/30"
+						}`}>
+						<Layers className="h-3 w-3" />
+						slot {slots?.active ?? 0}/{slots?.total ?? 1}
+					</Badge>
+					<Button
+						onClick={onClearChat}
+						variant="outline"
+						size="sm"
+						className="h-7 px-2 text-[11px] font-medium bg-slate-900/60 border-red-500/30 text-red-400 hover:bg-red-950/40 hover:text-red-300 hover:border-red-500/50 transition-all">
+						<Trash2 className="h-3 w-3" />
+						<span className="hidden sm:inline ml-1">Clear</span>
+					</Button>
+				</div>
+			</div>
+		</header>
+	);
 }

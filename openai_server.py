@@ -6,13 +6,56 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIST = os.path.join(HERE, "web", "dist")
 ENGINE_BIN = os.path.join(HERE, "c", "vapor_engine")
 DEFAULT_MODEL_DIR = os.path.join(HERE, "models", "gemma-4-E4B-it")
+VAPOR_CONFIG_PATH = os.path.join(HERE, "vapor.json")
 
-VERSION = "1.0.6"
+# Gemma 4 E4B-it was trained with max_position_embeddings=131072 (sliding window 512).
+# VaporRAM caps this to 8192 by default to stay under the 1.5 GB RAM ceiling;
+# power users with more RAM can override via vapor.json or POST /v1/system/context.
+MODEL_MAX_CONTEXT = 131072
+DEFAULT_CONTEXT_WINDOW = 8192
+
+try:
+    from config import load_config as _load_vapor_config
+    _vapor_cfg = _load_vapor_config(VAPOR_CONFIG_PATH)
+    n_ctx = int(_vapor_cfg.get("n_ctx", DEFAULT_CONTEXT_WINDOW))
+except Exception:
+    n_ctx = DEFAULT_CONTEXT_WINDOW
+n_ctx = max(512, min(n_ctx, MODEL_MAX_CONTEXT))
+
+VERSION = "1.0.7-alpha.1"
 current_model_path = DEFAULT_MODEL_DIR
 download_progress = {"status": "idle", "percent": 0, "message": "Ready"}
 completed_reset_timer = None
 server_instance = None
 llama_model_cache = {}
+_n_ctx_lock = threading.Lock()
+
+# Per-model slot accounting. VaporRAM runs in single-tenant dedicated mode,
+# so each loaded model has exactly 1 KV-cache slot reserved for the active chat.
+# n_parallel=1 is enforced by the 1.5 GB RAM ceiling; the counter increments
+# while a generation is in flight and decrements when it returns.
+slot_registry = {}
+_slot_lock = threading.Lock()
+
+
+def _slot_begin(model_id):
+    with _slot_lock:
+        entry = slot_registry.setdefault(model_id, {"active": 0, "total": 1})
+        entry["active"] += 1
+        return entry["active"], entry["total"]
+
+
+def _slot_end(model_id):
+    with _slot_lock:
+        entry = slot_registry.setdefault(model_id, {"active": 0, "total": 1})
+        entry["active"] = max(0, entry["active"] - 1)
+        return entry["active"], entry["total"]
+
+
+def _slot_snapshot(model_id):
+    with _slot_lock:
+        entry = slot_registry.setdefault(model_id, {"active": 0, "total": 1})
+        return {"active": entry["active"], "total": entry["total"]}
 
 def reset_progress_idle():
     global download_progress
@@ -66,9 +109,10 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             return
 
         code = args[1] if len(args) > 1 else "200"
+        code = str(code) if code is not None else "???"
         method = self.command if hasattr(self, "command") else "GET"
 
-        if str(code).startswith("2") or str(code).startswith("3"):
+        if code.startswith("2") or code.startswith("3"):
             color_code = "\033[32m" # Green
             color_method = "\033[36m" # Cyan
         else:
@@ -78,16 +122,27 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         reset = "\033[0m"
         dim = "\033[90m"
 
-        sys.stderr.write(f"{color_method}[{method}]{reset} {path} {color_code}{code}{reset} {dim}(vapor-engine v{VERSION})\033[0m\n")
+        try:
+            sys.stderr.write(f"{color_method}[{method}]{reset} {path} {color_code}{code}{reset} {dim}(vapor-engine v{VERSION})\033[0m\n")
+            sys.stderr.flush()
+        except (BrokenPipeError, ConnectionResetError, ValueError):
+            pass
 
     def _send_json(self, data, status=200):
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
-        self.end_headers()
-        self.wfile.write(json.dumps(data, indent=2).encode("utf-8"))
+        try:
+            body = json.dumps(data, indent=2).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # Client hung up before we finished flushing. Nothing useful we can do;
+            # the request itself was handled and the response was on its way out.
+            pass
 
     def _check_auth(self):
         if not VaporRequestHandler.api_key:
@@ -121,7 +176,10 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 "model_available": weights_exist,
                 "connection": "CONNECTED" if weights_exist else "SIMULATION_MODE",
                 "ram_ceiling_gb": 1.5,
-                "peak_rss_mb": 142.32
+                "peak_rss_mb": 142.32,
+                "n_ctx": n_ctx,
+                "model_max_context": MODEL_MAX_CONTEXT,
+                "slots": _slot_snapshot(current_model_path)
             })
 
         if path.endswith("/models"):
@@ -138,7 +196,8 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                     "n_layers": 32,
                     "hidden_dim": 3072,
                     "n_heads": 16,
-                    "context_length": 2048,
+                    "context_length": n_ctx,
+                    "model_max_context": MODEL_MAX_CONTEXT,
                     "ram_ceiling_gb": 1.5,
                     "peak_rss_mb": 142.32,
                     "model_path": current_model_path,
@@ -161,7 +220,10 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 "message": f"Scanned {len(scan_system_for_models())} directories for GGUF models.",
                 "active_path": current_model_path,
                 "scanned_models": scan_system_for_models(),
-                "download_progress": res_prog
+                "download_progress": res_prog,
+                "n_ctx": n_ctx,
+                "model_max_context": MODEL_MAX_CONTEXT,
+                "slots": _slot_snapshot(current_model_path)
             })
 
         # Brain Cortex & Profiling metrics endpoints
@@ -209,17 +271,20 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             mime, _ = mimetypes.guess_type(file_path)
             with open(file_path, "rb") as f:
                 content = f.read()
-            self.send_response(200)
-            self.send_header("Content-Type", mime or "application/octet-stream")
-            self.send_header("Content-Length", str(len(content)))
-            self.end_headers()
-            self.wfile.write(content)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", mime or "application/octet-stream")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
             return
 
         self._send_json({"error": "Not Found", "message": f"Endpoint {path} not found"}, status=404)
 
     def do_POST(self):
-        global current_model_path, download_progress
+        global current_model_path, download_progress, n_ctx
         if not self._check_auth():
             return self._send_json({"error": "Unauthorized API key", "message": "Unauthorized API key"}, status=401)
 
@@ -262,13 +327,38 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             else:
                 return self._send_json({"error": "Path Not Found", "message": f"Path '{new_path}' does not exist on host system"}, status=400)
 
+        # Adjust the active KV-cache context window at runtime. The next request
+        # will rebuild the Llama instance if the new size doesn't match the cache.
+        if path.endswith("/context") or path.endswith("/system/context"):
+            try:
+                requested = int(payload.get("n_ctx", 0))
+            except (TypeError, ValueError):
+                return self._send_json({"error": "Bad Request", "message": "n_ctx must be an integer"}, status=400)
+            if requested < 512:
+                return self._send_json({"error": "Below Minimum", "message": "n_ctx must be at least 512 tokens"}, status=400)
+            if requested > MODEL_MAX_CONTEXT:
+                return self._send_json({"error": "Above Maximum", "message": f"Model was trained with max_position_embeddings={MODEL_MAX_CONTEXT}"}, status=400)
+            with _n_ctx_lock:
+                old_ctx = n_ctx
+                n_ctx = requested
+                for cached_path, cached_llm in list(llama_model_cache.items()):
+                    if getattr(cached_llm, "_vapor_ctx_size", None) != n_ctx:
+                        llama_model_cache.pop(cached_path, None)
+            return self._send_json({
+                "status": "ok",
+                "old_n_ctx": old_ctx,
+                "n_ctx": n_ctx,
+                "model_max_context": MODEL_MAX_CONTEXT,
+                "message": f"Context window adjusted {old_ctx} -> {n_ctx}. Cached model will rebuild on next request."
+            })
+
         # Trigger model weight downloader for GGUF model from Hugging Face
         if path.endswith("/download_model") or path.endswith("/system/download_model"):
             def run_dl():
                 global download_progress
                 sys.path.insert(0, os.path.join(HERE, "tools"))
                 try:
-                    import download_model
+                    import download_model  # type: ignore[import-not-found]
                     def dl_cb(pct, msg):
                         global download_progress
                         download_progress = {"status": "downloading" if pct < 100 else "completed", "percent": pct, "message": msg}
@@ -332,8 +422,14 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                         "finish_reason": None
                     }]
                 }
-                self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode("utf-8"))
-                self.wfile.flush()
+                try:
+                    self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    # Client aborted the stream (browser navigated, network died, etc.).
+                    # Stop iterating tokens on the server side as well.
+                    self.close_connection = True
+                    return
                 time.sleep(0.01)
 
             end_chunk = {
@@ -349,9 +445,12 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                     "finish_reason": "stop"
                 }]
             }
-            self.wfile.write(f"data: {json.dumps(end_chunk)}\n\n".encode("utf-8"))
-            self.wfile.write(b"data: [DONE]\n\n")
-            self.wfile.flush()
+            try:
+                self.wfile.write(f"data: {json.dumps(end_chunk)}\n\n".encode("utf-8"))
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
             self.close_connection = True
             return
 
@@ -403,13 +502,25 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                     subprocess.check_call([sys.executable, "-m", "pip", "install", "--break-system-packages", "llama-cpp-python"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     from llama_cpp import Llama
 
-                if gguf_file not in llama_model_cache:
-                    sys.stderr.write(f"\033[36m[GGUF Engine] Loading real GGUF model: {gguf_file}\033[0m\n")
-                    llama_model_cache[gguf_file] = Llama(model_path=gguf_file, n_ctx=8192, n_threads=8, verbose=False)
-                
+                # Reuse cached model only if its KV budget still matches the active n_ctx;
+                # otherwise drop the old Llama so we free its KV before allocating a bigger one.
+                cached = llama_model_cache.get(gguf_file)
+                cached_ctx = getattr(cached, "_vapor_ctx_size", None) if cached is not None else None
+                if cached is None or cached_ctx != n_ctx:
+                    if cached is not None:
+                        sys.stderr.write(f"\033[36m[GGUF Engine] Reallocating KV cache from {cached_ctx} -> {n_ctx}\033[0m\n")
+                    else:
+                        sys.stderr.write(f"\033[36m[GGUF Engine] Loading real GGUF model: {gguf_file} (n_ctx={n_ctx})\033[0m\n")
+                    llama_model_cache[gguf_file] = Llama(model_path=gguf_file, n_ctx=n_ctx, n_threads=8, verbose=False)
+                    llama_model_cache[gguf_file]._vapor_ctx_size = n_ctx
+
                 llm = llama_model_cache[gguf_file]
                 formatted_prompt = f"User: {prompt}\nAssistant:"
-                output = llm(formatted_prompt, max_tokens=max_tokens, stop=["User:", "<|im_start|>", "<|endoftext|>"])
+                _slot_begin(gguf_file)
+                try:
+                    output = llm(formatted_prompt, max_tokens=max_tokens, stop=["User:", "<|im_start|>", "<|endoftext|>"])
+                finally:
+                    _slot_end(gguf_file)
                 gen_text = output["choices"][0]["text"].strip()
                 if gen_text:
                     return gen_text
@@ -419,7 +530,11 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         # 2. Execute GGUF model via C binary streamer
         if os.path.exists(current_model_path) and os.path.exists(ENGINE_BIN):
             try:
-                raw_output = subprocess.check_output([ENGINE_BIN, current_model_path, prompt], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+                _slot_begin(ENGINE_BIN)
+                try:
+                    raw_output = subprocess.check_output([ENGINE_BIN, current_model_path, prompt], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+                finally:
+                    _slot_end(ENGINE_BIN)
                 if raw_output:
                     return raw_output
             except Exception:
