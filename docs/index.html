@@ -310,8 +310,8 @@ section { padding: 6rem 0; }
 /* Footer */
 footer {
   border-top: 1px solid var(--border-light);
-  padding: 4rem 0 3rem;
-  background: #070A12;
+  padding: 3.5rem 0 3rem;
+  background: #050811;
 }
 footer .in {
   display: flex;
@@ -320,8 +320,17 @@ footer .in {
   flex-wrap: wrap;
   gap: 1.5rem;
 }
-footer .copy { color: var(--text-muted); font-size: .95rem; }
-footer .flinks { display: flex; gap: 1.8rem; font-weight: 500; font-size: .95rem; }
+footer .fbrand {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--text-main);
+}
+footer .fbrand img { width: 24px; height: 24px; border-radius: 5px; }
+footer .copy { color: var(--text-muted); font-size: .88rem; }
+footer .flinks { display: flex; gap: 1.8rem; font-weight: 500; font-size: .88rem; }
 footer .flinks a { color: var(--text-muted); transition: color .2s; }
 footer .flinks a:hover { color: var(--cyan); }
 </style>
@@ -455,8 +464,11 @@ footer .flinks a:hover { color: var(--cyan); }
 <!-- Footer -->
 <footer>
   <div class="wrap in">
+    <div class="fbrand">
+      <img src="assets/logo.png" alt="VaporRAM Logo"> VaporRAM
+    </div>
     <div class="copy">
-      © 2026 <strong>Sudeepta Sarkar (sudsarkar13)</strong>. Licensed under Apache 2.0.
+      © 2026 <strong>Sudeepta Sarkar (sudsarkar13)</strong>. Released under Apache 2.0 License.
     </div>
     <div class="flinks">
       <a href="https://pypi.org/project/vapor-ram/" target="_blank">PyPI Package</a>
