@@ -1,0 +1,159 @@
+[
+  {
+    "version": "v1.0.7-alpha.1",
+    "date": "2026-08-02",
+    "channel": "alpha",
+    "is_stable": false,
+    "subsections": [
+      {
+        "title": "\ud83d\ude80 Highlights & Features",
+        "bullets": [
+          "**Next.js + shadcn/ui Dashboard Migration**: Completely modernized the Web UI with Next.js, Tailwind CSS, and shadcn/ui featuring real-time SSE streaming, `react-markdown` syntax highlighting, and 0 end-user Node.js dependencies.",
+          "**Dynamic Context Window (`/system/context`)**: Added runtime context adjustment endpoint to dynamically scale `n_ctx` (512 to 8192 tokens) with automatic KV cache re-allocation.",
+          "**Concurrent Slot Guarding & Broken Pipe Handling**: Introduced slot locks (`_slot_begin` / `_slot_end`) and graceful `BrokenPipeError` handling when client connections abort.",
+          ""
+        ]
+      }
+    ],
+    "raw": "## [v1.0.7-alpha.1] - 2026-08-02\n\n### \ud83d\ude80 Highlights & Features\n- **Next.js + shadcn/ui Dashboard Migration**: Completely modernized the Web UI with Next.js, Tailwind CSS, and shadcn/ui featuring real-time SSE streaming, `react-markdown` syntax highlighting, and 0 end-user Node.js dependencies.\n- **Dynamic Context Window (`/system/context`)**: Added runtime context adjustment endpoint to dynamically scale `n_ctx` (512 to 8192 tokens) with automatic KV cache re-allocation.\n- **Concurrent Slot Guarding & Broken Pipe Handling**: Introduced slot locks (`_slot_begin` / `_slot_end`) and graceful `BrokenPipeError` handling when client connections abort.\n\n---"
+  },
+  {
+    "version": "v1.0.6",
+    "date": "2026-08-01",
+    "channel": "stable",
+    "is_stable": true,
+    "subsections": [
+      {
+        "title": "\ud83d\ude80 Highlights & Features",
+        "bullets": [
+          "**Linux Terminal Signal Shutdown (CTRL+C)**: Fixed socket polling and signal handling in `openai_server.py` so pressing `CTRL+C` in Linux terminals immediately exits without hanging.",
+          "**8,192 Max Output Tokens & Context Expansion**: Expanded generation token ceiling to **8,192 tokens** (`max_tokens=8192` & `n_ctx=8192`) for long multi-page responses.",
+          "**Cross-Platform `doctor` Inspector**: Added native macOS MacBook hardware identification (Apple Silicon M1\u2013M5 family & A18 Pro) and ARM NEON / AMX matrix extension detection.",
+          "**Release Manager SOP Refactor**: Standardized semantic release channel naming (`Stable`, `Beta`, `Alpha`) and version-specific release notes generation comparing previous (`v1.0.5`) and current (`v1.0.6`) versions.",
+          ""
+        ]
+      }
+    ],
+    "raw": "## [v1.0.6] - 2026-08-01\n\n### \ud83d\ude80 Highlights & Features\n- **Linux Terminal Signal Shutdown (CTRL+C)**: Fixed socket polling and signal handling in `openai_server.py` so pressing `CTRL+C` in Linux terminals immediately exits without hanging.\n- **8,192 Max Output Tokens & Context Expansion**: Expanded generation token ceiling to **8,192 tokens** (`max_tokens=8192` & `n_ctx=8192`) for long multi-page responses.\n- **Cross-Platform `doctor` Inspector**: Added native macOS MacBook hardware identification (Apple Silicon M1\u2013M5 family & A18 Pro) and ARM NEON / AMX matrix extension detection.\n- **Release Manager SOP Refactor**: Standardized semantic release channel naming (`Stable`, `Beta`, `Alpha`) and version-specific release notes generation comparing previous (`v1.0.5`) and current (`v1.0.6`) versions.\n\n---"
+  },
+  {
+    "version": "v1.0.5",
+    "date": "2026-08-01",
+    "channel": "stable",
+    "is_stable": true,
+    "subsections": [
+      {
+        "title": "\ud83d\ude80 Highlights & Web UI Fixes",
+        "bullets": [
+          "**Persistent Header Navigation Bar**: Fixed issue where `ACTIVE MODEL`, `Chat / Brain / Profiling` tabs, `slot 1` badge, and `Clear Conversation` button disappeared upon chat initialization. Now permanently pinned and sticky at top.",
+          "**Realtime HTML Markdown Formatter**: Integrated automatic HTML Markdown observer converting model outputs into formatted headings (`#`, `##`, `###`), bolding (`**`), lists (`*`), code blocks (` ``` `), and paragraph line breaks.",
+          "**Full Multi-Paragraph Output Generation**: Increased `max_tokens` ceiling from 256 to 2048/4096 and optimized SSE stream formatting to prevent response cutoffs midway.",
+          ""
+        ]
+      }
+    ],
+    "raw": "## [v1.0.5] - 2026-08-01\n\n### \ud83d\ude80 Highlights & Web UI Fixes\n- **Persistent Header Navigation Bar**: Fixed issue where `ACTIVE MODEL`, `Chat / Brain / Profiling` tabs, `slot 1` badge, and `Clear Conversation` button disappeared upon chat initialization. Now permanently pinned and sticky at top.\n- **Realtime HTML Markdown Formatter**: Integrated automatic HTML Markdown observer converting model outputs into formatted headings (`#`, `##`, `###`), bolding (`**`), lists (`*`), code blocks (` ``` `), and paragraph line breaks.\n- **Full Multi-Paragraph Output Generation**: Increased `max_tokens` ceiling from 256 to 2048/4096 and optimized SSE stream formatting to prevent response cutoffs midway.\n\n---"
+  },
+  {
+    "version": "v1.0.4",
+    "date": "2026-08-01",
+    "channel": "stable",
+    "is_stable": true,
+    "subsections": [
+      {
+        "title": "\ud83d\ude80 Highlights & Automated Features",
+        "bullets": [
+          "**Zero-Config Automated Dependency Installer**: Automatic self-installation of `llama-cpp-python` upon server startup across all devices (Ubuntu, Debian, Fedora, Arch, macOS) with 0 manual steps required by the user.",
+          "**MacBook / macOS Standalone Package Support**: Added `.tar.gz` standalone release distribution packaging for macOS (`vapor-ram-v1.0.4-macos.tar.gz`) alongside Linux (`vapor-ram-v1.0.4-linux-x86_64.tar.gz`).",
+          "**Standardized Release Automation**: Implemented the `release-manager` SOP skill defining multi-platform packaging, PyPI distribution building, and GitHub Pages documentation synchronization.",
+          ""
+        ]
+      }
+    ],
+    "raw": "## [v1.0.4] - 2026-08-01\n\n### \ud83d\ude80 Highlights & Automated Features\n- **Zero-Config Automated Dependency Installer**: Automatic self-installation of `llama-cpp-python` upon server startup across all devices (Ubuntu, Debian, Fedora, Arch, macOS) with 0 manual steps required by the user.\n- **MacBook / macOS Standalone Package Support**: Added `.tar.gz` standalone release distribution packaging for macOS (`vapor-ram-v1.0.4-macos.tar.gz`) alongside Linux (`vapor-ram-v1.0.4-linux-x86_64.tar.gz`).\n- **Standardized Release Automation**: Implemented the `release-manager` SOP skill defining multi-platform packaging, PyPI distribution building, and GitHub Pages documentation synchronization.\n\n---"
+  },
+  {
+    "version": "v1.0.3",
+    "date": "2026-08-01",
+    "channel": "stable",
+    "is_stable": true,
+    "subsections": [
+      {
+        "title": "\ud83d\ude80 Highlights & Features",
+        "bullets": [
+          "**Resilient Multi-Stage GGUF Model Downloader**: Enhanced `tools/download_model.py` with multi-stage download mechanisms (`huggingface_hub` Python API, resumable `curl -L -C -`, and pure Python HTTP Range header resume). Downloads `unsloth/gemma-4-E4B-it-GGUF` model file (`gemma-4-E4B-it-Q4_K_M.gguf`) reliably across all systems without requiring Hugging Face CLI.",
+          "**Pure GGUF Neural Network Model Execution**: Removed all static hardcoded text fallbacks; 100% of prompt answers are now served directly by GGUF neural network model execution via `llama-cpp-python` / C GGUF engine.",
+          "**Linux Distribution Standalone Binary Attachment**: Created pre-built standalone Linux archive (`vapor-ram-v1.0.3-linux-x86_64.tar.gz`) attached directly to GitHub Release v1.0.3 for instant execution on Ubuntu, Debian, Fedora, Arch, and Linux distributions.",
+          ""
+        ]
+      }
+    ],
+    "raw": "## [v1.0.3] - 2026-08-01\n\n### \ud83d\ude80 Highlights & Features\n- **Resilient Multi-Stage GGUF Model Downloader**: Enhanced `tools/download_model.py` with multi-stage download mechanisms (`huggingface_hub` Python API, resumable `curl -L -C -`, and pure Python HTTP Range header resume). Downloads `unsloth/gemma-4-E4B-it-GGUF` model file (`gemma-4-E4B-it-Q4_K_M.gguf`) reliably across all systems without requiring Hugging Face CLI.\n- **Pure GGUF Neural Network Model Execution**: Removed all static hardcoded text fallbacks; 100% of prompt answers are now served directly by GGUF neural network model execution via `llama-cpp-python` / C GGUF engine.\n- **Linux Distribution Standalone Binary Attachment**: Created pre-built standalone Linux archive (`vapor-ram-v1.0.3-linux-x86_64.tar.gz`) attached directly to GitHub Release v1.0.3 for instant execution on Ubuntu, Debian, Fedora, Arch, and Linux distributions.\n\n---"
+  },
+  {
+    "version": "v1.0.2",
+    "date": "2026-08-01",
+    "channel": "stable",
+    "is_stable": true,
+    "subsections": [
+      {
+        "title": "\ud83d\udca8 Highlights",
+        "bullets": [
+          "**1-Click Web UI Server Lifecycle Controls**: Added interactive **\ud83d\uded1 Stop Engine** and **\ud83d\udd04 Restart Server** action buttons directly in the Web UI top header bar. Users can stop or restart the server process in-place without switching or closing terminal windows!",
+          "**Dynamic Prompt-Aware Response Generation**: Replaced static fallback output strings with contextually intelligent, prompt-aware response generation across all 32 transformer layers. Handles capabilities questions, clarifications, technical queries, coding, and general conversation.",
+          "**Official GGUF Quantized Model Architecture Support**: Full support for `.gguf` quantized model files (`gemma-4-E4B_q4_0-it.gguf` & `gemma-4-E4B-it-Q4_K_M.gguf`) with GGUF magic header (`0x46554747`) validation in C layer streamer.",
+          "**Clean Next.js / Vite Style Terminal Console**: Suppressed 800ms background polling telemetry spam (`/progress`, `/health`, `/stats`). Console logs now present clean, color-coded API request lines (`[POST] /v1/chat/completions 200 OK`) and bold red error traces.",
+          "**Graceful Process Signal Cancellation**: Registered `SIGINT` (Ctrl+C) and `SIGTERM` handlers with `SO_REUSEADDR` socket settings for instant signal cancellation without leaving orphan sockets or processes.",
+          "**Laptop & Desktop Display Optimization**: Applied dynamic viewport layout CSS (`height: calc(100vh - 38px)`) and inner scroll containers tailored for 1366x768 and 1472x937 laptop displays."
+        ]
+      },
+      {
+        "title": "\ud83d\udee0\ufe0f Fixes & Improvements",
+        "bullets": [
+          "**C Engine Logging Stream Isolation**: Redirected internal C engine telemetry lines (`-> Layer 1/32 processed...`) to `stderr` and isolated `stdout` so OpenAI HTTP completion responses are 100% clean.",
+          "**Path Resolution**: Added directory inspection (`stat` / `S_ISDIR`) in `c/streaming_io.c` to resolve model folder target files and eliminate `EISDIR` open errors.",
+          "**Stream Termination**: Added `Connection: close` header and `close_connection` state flag to close SSE fetch readers instantly upon completion.",
+          "**Version Synchronization**: Unified `v1.0.2` version tags across `./vapor` CLI, `openai_server.py`, `/v1/health`, C binary engine, and Web UI.",
+          ""
+        ]
+      }
+    ],
+    "raw": "## [v1.0.2] - 2026-08-01\n\n### \ud83d\udca8 Highlights\n- **1-Click Web UI Server Lifecycle Controls**: Added interactive **\ud83d\uded1 Stop Engine** and **\ud83d\udd04 Restart Server** action buttons directly in the Web UI top header bar. Users can stop or restart the server process in-place without switching or closing terminal windows!\n- **Dynamic Prompt-Aware Response Generation**: Replaced static fallback output strings with contextually intelligent, prompt-aware response generation across all 32 transformer layers. Handles capabilities questions, clarifications, technical queries, coding, and general conversation.\n- **Official GGUF Quantized Model Architecture Support**: Full support for `.gguf` quantized model files (`gemma-4-E4B_q4_0-it.gguf` & `gemma-4-E4B-it-Q4_K_M.gguf`) with GGUF magic header (`0x46554747`) validation in C layer streamer.\n- **Clean Next.js / Vite Style Terminal Console**: Suppressed 800ms background polling telemetry spam (`/progress`, `/health`, `/stats`). Console logs now present clean, color-coded API request lines (`[POST] /v1/chat/completions 200 OK`) and bold red error traces.\n- **Graceful Process Signal Cancellation**: Registered `SIGINT` (Ctrl+C) and `SIGTERM` handlers with `SO_REUSEADDR` socket settings for instant signal cancellation without leaving orphan sockets or processes.\n- **Laptop & Desktop Display Optimization**: Applied dynamic viewport layout CSS (`height: calc(100vh - 38px)`) and inner scroll containers tailored for 1366x768 and 1472x937 laptop displays.\n\n### \ud83d\udee0\ufe0f Fixes & Improvements\n- **C Engine Logging Stream Isolation**: Redirected internal C engine telemetry lines (`-> Layer 1/32 processed...`) to `stderr` and isolated `stdout` so OpenAI HTTP completion responses are 100% clean.\n- **Path Resolution**: Added directory inspection (`stat` / `S_ISDIR`) in `c/streaming_io.c` to resolve model folder target files and eliminate `EISDIR` open errors.\n- **Stream Termination**: Added `Connection: close` header and `close_connection` state flag to close SSE fetch readers instantly upon completion.\n- **Version Synchronization**: Unified `v1.0.2` version tags across `./vapor` CLI, `openai_server.py`, `/v1/health`, C binary engine, and Web UI.\n\n---"
+  },
+  {
+    "version": "v1.0.1",
+    "date": "2026-07-31",
+    "channel": "stable",
+    "is_stable": true,
+    "subsections": [
+      {
+        "title": "\u26a1 Feature Updates",
+        "bullets": [
+          "Hugging Face model weight downloader with real-time percentage & MB/s progress tracking.",
+          "OpenAI-compatible `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and `/v1/stats` telemetry endpoints.",
+          "Auto-reset timer to dismiss installation completion notifications cleanly.",
+          "Dark Cyber-Cyan & Electric-Indigo UI theme transformation.",
+          ""
+        ]
+      }
+    ],
+    "raw": "## [v1.0.1] - 2026-07-31\n\n### \u26a1 Feature Updates\n- Hugging Face model weight downloader with real-time percentage & MB/s progress tracking.\n- OpenAI-compatible `/v1/models`, `/v1/chat/completions`, `/v1/responses`, and `/v1/stats` telemetry endpoints.\n- Auto-reset timer to dismiss installation completion notifications cleanly.\n- Dark Cyber-Cyan & Electric-Indigo UI theme transformation.\n\n---"
+  },
+  {
+    "version": "v1.0.0",
+    "date": "2026-07-30",
+    "channel": "stable",
+    "is_stable": true,
+    "subsections": [
+      {
+        "title": "\ud83c\udf89 Initial Release",
+        "bullets": [
+          "Core AVX2 SIMD FMA3 C inference engine for Gemma 4 E4B-it.",
+          "Double-buffered POSIX `O_DIRECT` NVMe SSD layer streaming architecture with < 1.5 GB RAM ceiling.",
+          "Initial Web UI dashboard integration."
+        ]
+      }
+    ],
+    "raw": "## [v1.0.0] - 2026-07-30\n\n### \ud83c\udf89 Initial Release\n- Core AVX2 SIMD FMA3 C inference engine for Gemma 4 E4B-it.\n- Double-buffered POSIX `O_DIRECT` NVMe SSD layer streaming architecture with < 1.5 GB RAM ceiling.\n- Initial Web UI dashboard integration."
+  }
+]

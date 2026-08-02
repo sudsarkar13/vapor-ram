@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VaporRAM — Version History & Changelog</title>
-<meta name="description" content="Complete version history, release notes, bug fixes, and feature comparisons for VaporRAM.">
+<title>VaporRAM — Dynamic Version History & Changelog</title>
+<meta name="description" content="Complete version history, release notes, bug fixes, and feature comparisons for VaporRAM. Dynamically updated from CHANGELOG.md.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💨</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -110,7 +110,7 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
 
 /* Page Header */
 .page-header {
-  padding: 8.5rem 0 3rem;
+  padding: 8.5rem 0 2.5rem;
 }
 .page-title {
   font-size: clamp(2.2rem, 4.5vw, 3.5rem);
@@ -124,6 +124,26 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
   margin-top: .6rem;
 }
 
+.search-bar {
+  margin-top: 1.5rem;
+  max-width: 450px;
+}
+.search-input {
+  width: 100%;
+  background: rgba(17, 24, 39, 0.8);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: .75rem 1rem;
+  color: var(--text-main);
+  font-family: var(--sans);
+  font-size: .95rem;
+  outline: none;
+  transition: border-color .2s;
+}
+.search-input:focus {
+  border-color: var(--cyan);
+}
+
 /* Timeline Layout */
 .timeline {
   position: relative;
@@ -134,7 +154,7 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
 }
 .timeline-item {
   position: relative;
-  margin-bottom: 3.5rem;
+  margin-bottom: 3rem;
 }
 .timeline-item::before {
   content: '';
@@ -266,77 +286,19 @@ footer .flinks a:hover { color: var(--cyan); }
 <!-- Page Header -->
 <div class="page-header wrap">
   <h1 class="page-title">Version History &amp; Changelog</h1>
-  <p class="page-sub">Detailed release notes, feature highlights, performance optimizations, and bug fixes across all versions.</p>
+  <p class="page-sub">Dynamically loaded version timeline detailing release highlights, features, bug fixes, and performance updates across all versions.</p>
+
+  <div class="search-bar">
+    <input type="text" id="search-input" class="search-input" placeholder="Search changelog (e.g. Next.js, macOS, O_DIRECT)..." oninput="filterChangelog()">
+  </div>
 </div>
 
 <!-- Timeline Section -->
 <div class="wrap">
-  <div class="timeline">
-
-    <!-- Version 1.0.7-alpha.1 -->
-    <div class="timeline-item alpha">
-      <div class="timeline-card">
-        <div class="timeline-header">
-          <div class="timeline-ver">
-            <span>v1.0.7-alpha.1</span>
-            <span class="tag-badge alpha">Alpha Preview</span>
-          </div>
-          <span class="timeline-date">2026-08-02</span>
-        </div>
-
-        <div class="change-group">
-          <div class="change-group-title">🚀 Highlights &amp; Features</div>
-          <ul class="change-list">
-            <li><strong>Next.js + shadcn/ui Dashboard Migration</strong>: Rebuilt the local Web UI with Next.js, Tailwind CSS, and shadcn/ui featuring real-time SSE streaming, syntax highlighting, and 0 end-user Node.js dependencies.</li>
-            <li><strong>Dynamic Context Window Endpoint (<code class="mono">/system/context</code>)</strong>: Added runtime context adjustment endpoint to dynamically scale context window (<code class="mono">n_ctx</code>) between 512 and 8,192 tokens.</li>
-            <li><strong>Concurrent Slot Guarding</strong>: Introduced slot locks (<code class="mono">_slot_begin</code> / <code class="mono">_slot_end</code>) and graceful SSE disconnect handling.</li>
-          </ul>
-        </div>
-      </div>
+  <div class="timeline" id="changelog-timeline">
+    <div style="padding:3rem;text-align:center;color:var(--text-muted);font-family:var(--mono);">
+      Loading changelog entries...
     </div>
-
-    <!-- Version 1.0.6 -->
-    <div class="timeline-item">
-      <div class="timeline-card">
-        <div class="timeline-header">
-          <div class="timeline-ver">
-            <span>v1.0.6</span>
-            <span class="tag-badge stable">Stable Release</span>
-          </div>
-          <span class="timeline-date">2026-08-01</span>
-        </div>
-
-        <div class="change-group">
-          <div class="change-group-title">🚀 Highlights &amp; Features</div>
-          <ul class="change-list">
-            <li><strong>Apple Silicon MacBook Support</strong>: Expanded hardware inspector (<code class="mono">doctor.py</code>) to identify Apple Silicon M-Series chipsets (M1, M2, M3, M4, M5, A18 Pro) and ARM NEON / AMX matrix extensions.</li>
-            <li><strong>Expanded Max Output Limit</strong>: Increased max generation token ceiling to 8,192 tokens.</li>
-            <li><strong>Linux Terminal Signal Clean Shutdown</strong>: Updated HTTP server socket timeout and SIGINT signal handler to cleanly terminate immediately on CTRL+C.</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-
-    <!-- Version 1.0.5 -->
-    <div class="timeline-item">
-      <div class="timeline-card">
-        <div class="timeline-header">
-          <div class="timeline-ver">
-            <span>v1.0.5</span>
-            <span class="tag-badge stable">Stable Release</span>
-          </div>
-          <span class="timeline-date">2026-07-31</span>
-        </div>
-
-        <div class="change-group">
-          <div class="change-group-title">🚀 Highlights &amp; Features</div>
-          <ul class="change-list">
-            <li><strong>Double-Buffer O_DIRECT Layer Streamer</strong>: Initial C engine release supporting 140 MB/layer POSIX unbuffered streaming with AVX2 SIMD matrix kernels.</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-
   </div>
 </div>
 
@@ -356,6 +318,94 @@ footer .flinks a:hover { color: var(--cyan); }
     </div>
   </div>
 </footer>
+
+<script>
+let changelogData = [];
+
+async function loadChangelog() {
+  try {
+    const res = await fetch('assets/changelog.json');
+    if (res.ok) {
+      changelogData = await res.json();
+    } else {
+      throw new Error('Local JSON unavailable');
+    }
+  } catch (e) {
+    console.warn('Failed loading assets/changelog.json:', e);
+  }
+
+  renderChangelog(changelogData);
+}
+
+function renderChangelog(items) {
+  const container = document.getElementById('changelog-timeline');
+  if (!items || items.length === 0) {
+    container.innerHTML = `<div style="padding:3rem;color:var(--text-muted);">No matching changelog entries found.</div>`;
+    return;
+  }
+
+  container.innerHTML = items.map(item => {
+    const isAlpha = item.channel === 'alpha';
+    const badgeClass = isAlpha ? 'alpha' : 'stable';
+    const badgeLabel = isAlpha ? 'Alpha Preview' : 'Stable Release';
+
+    let groupsHtml = '';
+    if (item.subsections && item.subsections.length > 0) {
+      groupsHtml = item.subsections.map(sub => `
+        <div class="change-group">
+          <div class="change-group-title">${sub.title}</div>
+          <ul class="change-list">
+            ${sub.bullets.map(b => `<li>${formatMarkdownText(b)}</li>`).join('')}
+          </ul>
+        </div>
+      `).join('');
+    } else if (item.raw) {
+      groupsHtml = `<div style="color:var(--text-muted);font-size:.95rem;margin-top:1rem;">${formatMarkdownText(item.raw)}</div>`;
+    }
+
+    return `
+      <div class="timeline-item ${isAlpha ? 'alpha' : ''}">
+        <div class="timeline-card">
+          <div class="timeline-header">
+            <div class="timeline-ver">
+              <span>${item.version}</span>
+              <span class="tag-badge ${badgeClass}">${badgeLabel}</span>
+            </div>
+            <span class="timeline-date">${item.date}</span>
+          </div>
+          ${groupsHtml}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function formatMarkdownText(text) {
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code class="mono" style="color:var(--cyan);">$1</code>');
+}
+
+function filterChangelog() {
+  const q = document.getElementById('search-input').value.toLowerCase().trim();
+  if (!q) {
+    renderChangelog(changelogData);
+    return;
+  }
+
+  const filtered = changelogData.filter(item => {
+    const rawMatch = item.version.toLowerCase().includes(q) || item.date.includes(q);
+    const subMatch = item.subsections?.some(s => 
+      s.title.toLowerCase().includes(q) || s.bullets.some(b => b.toLowerCase().includes(q))
+    );
+    return rawMatch || subMatch;
+  });
+
+  renderChangelog(filtered);
+}
+
+document.addEventListener('DOMContentLoaded', loadChangelog);
+</script>
 
 </body>
 </html>

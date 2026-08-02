@@ -18,6 +18,12 @@ def create_release():
     except Exception as e:
         print(f"[!] Warning: C compilation failed ({e}), packaging Python and Web UI runtime...")
 
+    print("1.5. Updating dynamic JSON documentation datasets (changelog.json & releases.json)...")
+    try:
+        subprocess.check_call([sys.executable, os.path.join(HERE, "tools", "update_docs_data.py")])
+    except Exception as e:
+        print(f"[!] Warning: Docs data update failed ({e})")
+
     dist_base = f"vapor-ram-v{VERSION}"
     
     # 2. Package Linux tar.gz
