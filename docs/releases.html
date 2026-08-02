@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VaporRAM — Release Channels & Downloads</title>
+<meta name="description" content="Download official VaporRAM stable, beta, and alpha standalone OS distribution packages for Linux and macOS.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💨</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-dark: #0B0F19;
+  --bg-card: rgba(17, 24, 39, 0.75);
+  --bg-card-hover: rgba(31, 41, 55, 0.85);
+  --border-glow: rgba(59, 130, 246, 0.25);
+  --border-light: rgba(255, 255, 255, 0.1);
+  --text-main: #F9FAFB;
+  --text-muted: #9CA3AF;
+  --cyan: #06B6D4;
+  --indigo: #6366F1;
+  --emerald: #10B981;
+  --amber: #F59E0B;
+  --purple: #A855F7;
+  --sans: 'Outfit', 'Inter', -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+  --maxw: 1200px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg-dark);
+  color: var(--text-main);
+  font-family: var(--sans);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+a { color: inherit; text-decoration: none; }
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 4vw, 2.5rem); }
+
+/* Navigation */
+nav {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 50;
+  background: rgba(11, 15, 25, 0.85);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border-light);
+}
+nav .in {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 1.1rem clamp(1.2rem, 4vw, 2.5rem);
+}
+nav .brand {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  font-weight: 800;
+  font-size: 1.5rem;
+  letter-spacing: -.03em;
+  background: linear-gradient(135deg, var(--cyan), var(--indigo));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+nav .brand .vtag {
+  background: rgba(6, 182, 212, 0.15);
+  color: var(--cyan);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  font-size: .72rem;
+  padding: .2rem .5rem;
+  border-radius: 6px;
+  font-family: var(--mono);
+  -webkit-text-fill-color: var(--cyan);
+}
+nav .nl {
+  margin-left: auto;
+  display: flex;
+  gap: 2rem;
+  align-items: center;
+  font-weight: 500;
+  font-size: .95rem;
+}
+nav .nl a:not(.btn-glow) { color: var(--text-muted); transition: color .2s; }
+nav .nl a:not(.btn-glow):hover { color: var(--text-main); }
+nav .nl a.active { color: var(--cyan); font-weight: 600; }
+
+.btn-glow {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: .92rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  background: linear-gradient(135deg, var(--cyan), var(--indigo));
+  color: #fff;
+  padding: .65rem 1.3rem;
+  border-radius: 8px;
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
+  transition: all .25s ease;
+  border: none;
+  cursor: pointer;
+}
+.btn-glow:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 30px rgba(6, 182, 212, 0.5);
+}
+
+.btn-ghost {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: .88rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-main);
+  padding: .5rem 1.1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  transition: all .25s ease;
+}
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+/* Page Header */
+.page-header {
+  padding: 8.5rem 0 3rem;
+}
+.page-title {
+  font-size: clamp(2.2rem, 4.5vw, 3.5rem);
+  font-weight: 800;
+  letter-spacing: -.02em;
+}
+.page-sub {
+  color: var(--text-muted);
+  font-size: 1.15rem;
+  max-width: 700px;
+  margin-top: .6rem;
+}
+
+/* Release Cards */
+.release-section { margin-bottom: 4rem; }
+.release-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border-light);
+  border-radius: 16px;
+  padding: 2rem;
+  margin-top: 1.5rem;
+  transition: all .3s ease;
+}
+.release-card:hover {
+  border-color: var(--border-glow);
+  box-shadow: 0 10px 30px rgba(6, 182, 212, 0.1);
+}
+.release-card.stable { border-left: 4px solid var(--emerald); }
+.release-card.alpha { border-left: 4px solid var(--amber); }
+
+.release-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.release-ver {
+  font-size: 1.5rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+}
+.channel-badge {
+  font-size: .72rem;
+  font-weight: 700;
+  font-family: var(--mono);
+  padding: .25rem .6rem;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.channel-badge.stable { background: rgba(16, 185, 129, 0.15); color: var(--emerald); border: 1px solid rgba(16, 185, 129, 0.3); }
+.channel-badge.alpha { background: rgba(245, 158, 11, 0.15); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.3); }
+
+.release-date { font-size: .88rem; color: var(--text-muted); font-family: var(--mono); }
+.release-desc { color: var(--text-muted); font-size: .98rem; margin-bottom: 1.5rem; line-height: 1.6; }
+
+.downloads-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-top: 1.2rem;
+}
+.download-box {
+  background: rgba(11, 15, 25, 0.7);
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  padding: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.download-box .os-info { display: flex; align-items: center; gap: .8rem; }
+.download-box .os-name { font-weight: 700; font-size: .95rem; }
+.download-box .os-spec { font-size: .78rem; color: var(--text-muted); font-family: var(--mono); }
+
+/* Footer */
+footer {
+  border-top: 1px solid var(--border-light);
+  padding: 3rem 0;
+  background: #050811;
+  margin-top: 4rem;
+}
+footer .in {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+footer .fbrand {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--text-main);
+}
+footer .copy { color: var(--text-muted); font-size: .88rem; }
+footer .flinks { display: flex; gap: 1.8rem; font-weight: 500; font-size: .88rem; }
+footer .flinks a { color: var(--text-muted); transition: color .2s; }
+footer .flinks a:hover { color: var(--cyan); }
+</style>
+</head>
+<body>
+
+<!-- Navigation -->
+<nav>
+  <div class="in">
+    <a href="index.html" class="brand">
+      <span style="font-size:1.4rem;line-height:1;display:inline-block;-webkit-text-fill-color:initial;">💨</span> VaporRAM <span class="vtag">v1.0.6</span>
+    </a>
+    <div class="nl">
+      <a href="index.html#features">Architecture</a>
+      <a href="releases.html" class="active">Releases</a>
+      <a href="changelog.html">Changelog</a>
+      <a href="index.html#quickstart">Quickstart</a>
+      <a href="https://pypi.org/project/vapor-ram/" target="_blank">PyPI</a>
+      <a href="https://github.com/sudsarkar13/vapor-ram" target="_blank" class="btn-glow">GitHub Repo</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Page Header -->
+<div class="page-header wrap">
+  <h1 class="page-title">Release Channels &amp; Downloads</h1>
+  <p class="page-sub">Official standalone OS distributions for Linux and macOS. Stable releases are recommended for general usage.</p>
+</div>
+
+<!-- Release List -->
+<div class="wrap release-section">
+
+  <!-- Stable Release Card (v1.0.6) -->
+  <div class="release-card stable">
+    <div class="release-header">
+      <div class="release-ver">
+        <span>v1.0.6</span>
+        <span class="channel-badge stable">Stable Release</span>
+      </div>
+      <span class="release-date">Released: 2026-08-01</span>
+    </div>
+    <p class="release-desc">
+      Official production stable release. Featuring cross-platform macOS MacBook Apple Silicon (M1-M5) hardware detection, expanded 8,192 token output limit, instant terminal signal shutdown, and unsuppressed low-level C engine diagnostics.
+    </p>
+
+    <div class="downloads-grid">
+      <div class="download-box">
+        <div class="os-info">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"></path></svg>
+          <div>
+            <div class="os-name">Linux x86_64</div>
+            <div class="os-spec">AVX2 + FMA3 SIMD (135.5 MB)</div>
+          </div>
+        </div>
+        <a href="https://github.com/sudsarkar13/vapor-ram/releases/download/v1.0.6/vapor-ram-v1.0.6-linux-x86_64.tar.gz" class="btn-ghost">Download .tar.gz</a>
+      </div>
+
+      <div class="download-box">
+        <div class="os-info">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--indigo)" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"></path></svg>
+          <div>
+            <div class="os-name">macOS Apple Silicon</div>
+            <div class="os-spec">ARM NEON + AMX (135.5 MB)</div>
+          </div>
+        </div>
+        <a href="https://github.com/sudsarkar13/vapor-ram/releases/download/v1.0.6/vapor-ram-v1.0.6-macos.tar.gz" class="btn-ghost">Download .tar.gz</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alpha Release Card (v1.0.7-alpha.1) -->
+  <div class="release-card alpha">
+    <div class="release-header">
+      <div class="release-ver">
+        <span>v1.0.7-alpha.1</span>
+        <span class="channel-badge alpha">Alpha Preview</span>
+      </div>
+      <span class="release-date">Released: 2026-08-02</span>
+    </div>
+    <p class="release-desc">
+      Preview channel release. Introduces the Next.js + shadcn/ui + Tailwind CSS Web UI dashboard migration, dynamic context window scaling (/system/context), and concurrent slot locks.
+    </p>
+
+    <div class="downloads-grid">
+      <div class="download-box">
+        <div class="os-info">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"></path></svg>
+          <div>
+            <div class="os-name">Linux x86_64</div>
+            <div class="os-spec">AVX2 + FMA3 SIMD (135.5 MB)</div>
+          </div>
+        </div>
+        <a href="https://github.com/sudsarkar13/vapor-ram/releases/download/v1.0.7-alpha.1/vapor-ram-v1.0.7-alpha.1-linux-x86_64.tar.gz" class="btn-ghost">Download .tar.gz</a>
+      </div>
+
+      <div class="download-box">
+        <div class="os-info">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"></path></svg>
+          <div>
+            <div class="os-name">macOS Apple Silicon</div>
+            <div class="os-spec">ARM NEON + AMX (135.5 MB)</div>
+          </div>
+        </div>
+        <a href="https://github.com/sudsarkar13/vapor-ram/releases/download/v1.0.7-alpha.1/vapor-ram-v1.0.7-alpha.1-macos.tar.gz" class="btn-ghost">Download .tar.gz</a>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Footer -->
+<footer>
+  <div class="wrap in">
+    <div class="fbrand">
+      <span style="font-size:1.2rem;line-height:1;">💨</span> VaporRAM
+    </div>
+    <div class="copy">
+      © 2026 <strong>Sudeepta Sarkar (sudsarkar13)</strong>. Released under Apache 2.0 License.
+    </div>
+    <div class="flinks">
+      <a href="https://pypi.org/project/vapor-ram/" target="_blank">PyPI Package</a>
+      <a href="https://github.com/sudsarkar13/vapor-ram" target="_blank">GitHub</a>
+      <a href="changelog.html">Changelog</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
