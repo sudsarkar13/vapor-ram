@@ -72,13 +72,11 @@ python3 tests/test_engine.py
 
 ---
 
-### 4. Build OS Distribution Tarballs & Dynamic Documentation Data
-Run the release packager script to compile binaries, update dynamic docs datasets (`changelog.json` & `releases.json`), and build standalone distribution packages:
+### 4. Build Standalone OS Release Archives (Linux & macOS)
+Package standalone binary archives for Ubuntu/Debian/Fedora/Arch Linux and macOS MacBooks:
 
 ```bash
-python3 tools/update_docs_data.py
 python3 tools/package_release.py
-```
 # Output generated:
 # - vapor-ram-vX.Y.Z-linux-x86_64.tar.gz
 # - vapor-ram-vX.Y.Z-macos.tar.gz
