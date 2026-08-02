@@ -4,6 +4,16 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 ---
 
+## [v1.0.7-alpha.2] - 2026-08-02
+
+### 🚀 Highlights & Features
+- **Customizable RAM Ceiling Target Selector**: Introduced interactive selector allowing users to set target RAM ceiling between 1.5 GB and 32.0 GB.
+- **Host System RAM Auto-Detection**: Integrated hardware inspector (`doctor.py`) into HTTP server to detect host system Total RAM and Available Free RAM.
+- **Persistent Server Settings (`vapor.json`)**: Added `/v1/system/config` GET/POST endpoints and `vapor.json` config persistence across server restarts.
+- **Dark Obsidian Select Popover**: Overhauled Select component dropdown styling for seamless dark theme consistency.
+
+---
+
 ## [v1.0.7-alpha.1] - 2026-08-02
 
 ### 🚀 Highlights & Features

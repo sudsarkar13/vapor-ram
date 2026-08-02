@@ -10,7 +10,7 @@ ENGINE_BIN = os.path.join(HERE, "c", "vapor_engine")
 PRESETS_DIR = os.path.join(HERE, "presets")
 
 BANNER = """\033[1;36m
-  💨 VaporRAM v1.0.7-alpha.1
+  💨 VaporRAM v1.0.7-alpha.2
   Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it
   Target Memory Footprint: < 1.5 GB RAM
 \033[0m"""
