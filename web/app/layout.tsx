@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import {
 	Geist,
 	Geist_Mono,
@@ -37,6 +37,10 @@ export const metadata: Metadata = {
 		],
 		apple: "/icon.svg",
 	},
+};
+
+// Next.js 15+ requires themeColor in its own viewport export.
+export const viewport: Viewport = {
 	themeColor: "#020617",
 };
 

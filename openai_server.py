@@ -18,9 +18,17 @@ try:
     from config import load_config as _load_vapor_config
     _vapor_cfg = _load_vapor_config(VAPOR_CONFIG_PATH)
     n_ctx = int(_vapor_cfg.get("n_ctx", DEFAULT_CONTEXT_WINDOW))
+    ram_ceiling_gb = float(_vapor_cfg.get("ram_ceiling_gb", 1.5))
 except Exception:
     n_ctx = DEFAULT_CONTEXT_WINDOW
+    ram_ceiling_gb = 1.5
 n_ctx = max(512, min(n_ctx, MODEL_MAX_CONTEXT))
+
+try:
+    import doctor
+    total_ram_gb, avail_ram_gb = doctor.get_ram_info()
+except Exception:
+    total_ram_gb, avail_ram_gb = 16.0, 8.0
 
 VERSION = "1.0.7-alpha.1"
 current_model_path = DEFAULT_MODEL_DIR
@@ -29,6 +37,19 @@ completed_reset_timer = None
 server_instance = None
 llama_model_cache = {}
 _n_ctx_lock = threading.Lock()
+
+def save_active_config():
+    try:
+        cfg = {
+            "model_id": "google/gemma-4-E4B-it",
+            "model_dir": current_model_path,
+            "ram_ceiling_gb": ram_ceiling_gb,
+            "n_ctx": n_ctx
+        }
+        with open(VAPOR_CONFIG_PATH, "w") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception as e:
+        sys.stderr.write(f"[Config] Error saving {VAPOR_CONFIG_PATH}: {e}\n")
 
 # Per-model slot accounting. VaporRAM runs in single-tenant dedicated mode,
 # so each loaded model has exactly 1 KV-cache slot reserved for the active chat.
@@ -175,7 +196,9 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 "model_path": current_model_path,
                 "model_available": weights_exist,
                 "connection": "CONNECTED" if weights_exist else "SIMULATION_MODE",
-                "ram_ceiling_gb": 1.5,
+                "ram_ceiling_gb": ram_ceiling_gb,
+                "total_ram_gb": round(total_ram_gb, 2),
+                "avail_ram_gb": round(avail_ram_gb, 2),
                 "peak_rss_mb": 142.32,
                 "n_ctx": n_ctx,
                 "model_max_context": MODEL_MAX_CONTEXT,
@@ -198,12 +221,27 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                     "n_heads": 16,
                     "context_length": n_ctx,
                     "model_max_context": MODEL_MAX_CONTEXT,
-                    "ram_ceiling_gb": 1.5,
+                    "ram_ceiling_gb": ram_ceiling_gb,
+                    "total_ram_gb": round(total_ram_gb, 2),
+                    "avail_ram_gb": round(avail_ram_gb, 2),
                     "peak_rss_mb": 142.32,
                     "model_path": current_model_path,
                     "availability": "Ready (GGUF Model Installed)" if weights_exist else "Download Required",
                     "connection": "Active NVMe O_DIRECT GGUF Streaming" if weights_exist else "Simulated Architecture Preview"
                 }]
+            })
+
+        # Config GET endpoint
+        if path.endswith("/config") or path.endswith("/system/config"):
+            return self._send_json({
+                "status": "ok",
+                "version": VERSION,
+                "n_ctx": n_ctx,
+                "model_max_context": MODEL_MAX_CONTEXT,
+                "ram_ceiling_gb": ram_ceiling_gb,
+                "total_ram_gb": round(total_ram_gb, 2),
+                "avail_ram_gb": round(avail_ram_gb, 2),
+                "model_path": current_model_path
             })
 
         # Progress polling & system scan GET endpoints
@@ -223,6 +261,9 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 "download_progress": res_prog,
                 "n_ctx": n_ctx,
                 "model_max_context": MODEL_MAX_CONTEXT,
+                "ram_ceiling_gb": ram_ceiling_gb,
+                "total_ram_gb": round(total_ram_gb, 2),
+                "avail_ram_gb": round(avail_ram_gb, 2),
                 "slots": _slot_snapshot(current_model_path)
             })
 
@@ -326,6 +367,67 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 return self._send_json({"status": "ok", "active_path": current_model_path, "message": f"Model directory updated to '{current_model_path}'"})
             else:
                 return self._send_json({"error": "Path Not Found", "message": f"Path '{new_path}' does not exist on host system"}, status=400)
+
+        # Update persistent server config (RAM ceiling, n_ctx, model_dir)
+        if path.endswith("/config") or path.endswith("/system/config"):
+            global ram_ceiling_gb
+            updated = False
+            msg_parts = []
+
+            if "ram_ceiling_gb" in payload:
+                try:
+                    new_ceiling = float(payload["ram_ceiling_gb"])
+                    if new_ceiling >= 0.5 and new_ceiling <= 128.0:
+                        ram_ceiling_gb = new_ceiling
+                        updated = True
+                        msg_parts.append(f"RAM ceiling set to {ram_ceiling_gb:.1f} GB")
+                except (TypeError, ValueError):
+                    pass
+
+            if "n_ctx" in payload:
+                try:
+                    requested = int(payload["n_ctx"])
+                    if 512 <= requested <= MODEL_MAX_CONTEXT:
+                        with _n_ctx_lock:
+                            if requested != n_ctx:
+                                old_ctx = n_ctx
+                                n_ctx = requested
+                                updated = True
+                                msg_parts.append(f"n_ctx adjusted {old_ctx} -> {n_ctx}")
+                                for cached_path, cached_llm in list(llama_model_cache.items()):
+                                    if getattr(cached_llm, "_vapor_ctx_size", None) != n_ctx:
+                                        llama_model_cache.pop(cached_path, None)
+                except (TypeError, ValueError):
+                    pass
+
+            if "model_dir" in payload and payload["model_dir"]:
+                new_dir = str(payload["model_dir"]).strip()
+                if os.path.exists(new_dir):
+                    current_model_path = new_dir
+                    updated = True
+                    msg_parts.append(f"Model dir set to {current_model_path}")
+
+            if updated:
+                save_active_config()
+                return self._send_json({
+                    "status": "ok",
+                    "n_ctx": n_ctx,
+                    "ram_ceiling_gb": ram_ceiling_gb,
+                    "total_ram_gb": round(total_ram_gb, 2),
+                    "avail_ram_gb": round(avail_ram_gb, 2),
+                    "model_path": current_model_path,
+                    "message": ". ".join(msg_parts) if msg_parts else "Server settings updated and saved persistently to vapor.json."
+                })
+            else:
+                return self._send_json({
+                    "status": "ok",
+                    "n_ctx": n_ctx,
+                    "ram_ceiling_gb": ram_ceiling_gb,
+                    "total_ram_gb": round(total_ram_gb, 2),
+                    "avail_ram_gb": round(avail_ram_gb, 2),
+                    "model_path": current_model_path,
+                    "message": "No changes applied."
+                })
 
         # Adjust the active KV-cache context window at runtime. The next request
         # will rebuild the Llama instance if the new size doesn't match the cache.

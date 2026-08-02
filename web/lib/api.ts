@@ -24,6 +24,18 @@ export interface VaporHealth {
 	model_max_context?: number;
 }
 
+export interface ServerConfig {
+	status: string;
+	version: string;
+	n_ctx: number;
+	model_max_context: number;
+	ram_ceiling_gb: number;
+	total_ram_gb: number;
+	avail_ram_gb: number;
+	model_path: string;
+	message?: string;
+}
+
 export interface SystemProgress {
 	status: "idle" | "downloading" | "loading" | "completed" | "error";
 	percent: number;
@@ -31,6 +43,9 @@ export interface SystemProgress {
 	slots?: VaporSlots;
 	n_ctx?: number;
 	model_max_context?: number;
+	ram_ceiling_gb?: number;
+	total_ram_gb?: number;
+	avail_ram_gb?: number;
 }
 
 const getBaseUrl = () => {
@@ -88,6 +103,34 @@ export async function downloadModel(
 	} catch {
 		return false;
 	}
+}
+
+export async function fetchServerConfig(): Promise<ServerConfig | null> {
+	try {
+		const res = await fetch(`${getBaseUrl()}/v1/system/config`, { cache: "no-store" });
+		if (res.ok) return await res.json();
+	} catch (e) {
+		console.warn("VaporRAM fetchServerConfig failed:", e);
+	}
+	return null;
+}
+
+export async function updateServerConfig(params: {
+	ram_ceiling_gb?: number;
+	n_ctx?: number;
+	model_dir?: string;
+}): Promise<ServerConfig | null> {
+	try {
+		const res = await fetch(`${getBaseUrl()}/v1/system/config`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(params),
+		});
+		if (res.ok) return await res.json();
+	} catch (e) {
+		console.warn("VaporRAM updateServerConfig failed:", e);
+	}
+	return null;
 }
 
 export async function setContextWindow(n_ctx: number): Promise<{
