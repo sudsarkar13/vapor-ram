@@ -3,18 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VaporRAM — Dynamic Release Channels & Downloads</title>
-<meta name="description" content="Official standalone OS distribution packages for Linux and macOS. Dynamically updated from GitHub releases.">
+<title>VaporRAM — Official Releases & Distribution Packages</title>
+<meta name="description" content="Download official VaporRAM stable, beta, and alpha standalone OS distribution packages for Linux and macOS.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💨</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Marked.js Markdown Parser -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
 :root {
   --bg-dark: #0B0F19;
   --bg-card: rgba(17, 24, 39, 0.75);
   --bg-card-hover: rgba(31, 41, 55, 0.85);
-  --border-glow: rgba(59, 130, 246, 0.25);
+  --border-glow: rgba(6, 182, 212, 0.25);
   --border-light: rgba(255, 255, 255, 0.1);
   --text-main: #F9FAFB;
   --text-muted: #9CA3AF;
@@ -107,10 +109,6 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
   border: none;
   cursor: pointer;
 }
-.btn-glow:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 0 30px rgba(6, 182, 212, 0.5);
-}
 
 .btn-ghost {
   font-family: var(--sans);
@@ -121,7 +119,7 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
   gap: .5rem;
   background: rgba(255, 255, 255, 0.05);
   color: var(--text-main);
-  padding: .5rem 1.1rem;
+  padding: .55rem 1.1rem;
   border-radius: 8px;
   border: 1px solid var(--border-light);
   transition: all .25s ease;
@@ -133,7 +131,7 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
 
 /* Page Header */
 .page-header {
-  padding: 8.5rem 0 2.5rem;
+  padding: 8.5rem 0 2rem;
 }
 .page-title {
   font-size: clamp(2.2rem, 4.5vw, 3.5rem);
@@ -147,17 +145,19 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
   margin-top: .6rem;
 }
 
-/* Filters */
+/* Filter Controls */
 .filter-bar {
   display: flex;
+  align-items: center;
   gap: .8rem;
-  margin-top: 1.5rem;
+  margin-top: 1.8rem;
+  margin-bottom: 2rem;
   flex-wrap: wrap;
 }
 .filter-btn {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border-light);
+  color: var(--text-muted);
   padding: .45rem 1rem;
   border-radius: 8px;
   font-size: .88rem;
@@ -171,15 +171,14 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
   border-color: rgba(6, 182, 212, 0.4);
 }
 
-/* Release Cards */
-.release-section { margin-bottom: 4rem; }
+/* Release Card */
 .release-card {
   background: var(--bg-card);
   backdrop-filter: blur(16px);
   border: 1px solid var(--border-light);
   border-radius: 16px;
   padding: 2rem;
-  margin-top: 1.8rem;
+  margin-bottom: 2.5rem;
   transition: all .3s ease;
 }
 .release-card:hover {
@@ -187,8 +186,7 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
   box-shadow: 0 10px 30px rgba(6, 182, 212, 0.1);
 }
 .release-card.stable { border-left: 4px solid var(--emerald); }
-.release-card.alpha { border-left: 4px solid var(--amber); }
-.release-card.beta { border-left: 4px solid var(--purple); }
+.release-card.prerelease { border-left: 4px solid var(--amber); }
 
 .release-header {
   display: flex;
@@ -196,7 +194,9 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 1rem;
-  margin-bottom: 1rem;
+  margin-bottom: 1.2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-light);
 }
 .release-ver {
   font-size: 1.5rem;
@@ -212,20 +212,52 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
   padding: .25rem .6rem;
   border-radius: 6px;
   text-transform: uppercase;
-  letter-spacing: .05em;
 }
 .channel-badge.stable { background: rgba(16, 185, 129, 0.15); color: var(--emerald); border: 1px solid rgba(16, 185, 129, 0.3); }
-.channel-badge.alpha { background: rgba(245, 158, 11, 0.15); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.3); }
-.channel-badge.beta { background: rgba(168, 85, 247, 0.15); color: var(--purple); border: 1px solid rgba(168, 85, 247, 0.3); }
+.channel-badge.prerelease { background: rgba(245, 158, 11, 0.15); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.3); }
 
 .release-date { font-size: .88rem; color: var(--text-muted); font-family: var(--mono); }
-.release-desc { color: var(--text-muted); font-size: .98rem; margin-bottom: 1.5rem; line-height: 1.6; }
 
+/* Markdown Body Formatting */
+.markdown-body {
+  color: var(--text-main);
+  font-size: .98rem;
+  line-height: 1.7;
+}
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+  color: var(--cyan);
+  margin-top: 1.2rem;
+  margin-bottom: .6rem;
+  font-weight: 700;
+}
+.markdown-body ul, .markdown-body ol {
+  padding-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+.markdown-body li { margin-bottom: .4rem; color: var(--text-muted); }
+.markdown-body li strong { color: var(--text-main); }
+.markdown-body code {
+  font-family: var(--mono);
+  background: rgba(6, 182, 212, 0.12);
+  color: var(--cyan);
+  padding: .15rem .4rem;
+  border-radius: 4px;
+  font-size: .88rem;
+}
+
+.downloads-title {
+  font-size: .95rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-top: 1.8rem;
+  margin-bottom: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
 .downloads-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 1rem;
-  margin-top: 1.2rem;
 }
 .download-box {
   background: rgba(11, 15, 25, 0.7);
@@ -236,7 +268,6 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
   align-items: center;
   justify-content: space-between;
 }
-.download-box .os-info { display: flex; align-items: center; gap: .8rem; }
 .download-box .os-name { font-weight: 700; font-size: .95rem; }
 .download-box .os-spec { font-size: .78rem; color: var(--text-muted); font-family: var(--mono); }
 
@@ -274,7 +305,7 @@ footer .flinks a:hover { color: var(--cyan); }
 <nav>
   <div class="in">
     <a href="index.html" class="brand">
-      <span style="font-size:1.4rem;line-height:1;display:inline-block;-webkit-text-fill-color:initial;">💨</span> VaporRAM <span class="vtag">v1.0.6</span>
+      <span style="font-size:1.4rem;line-height:1;display:inline-block;-webkit-text-fill-color:initial;">💨</span> VaporRAM <span id="nav-vtag" class="vtag">v1.0.6</span>
     </a>
     <div class="nl">
       <a href="index.html#features">Architecture</a>
@@ -290,19 +321,19 @@ footer .flinks a:hover { color: var(--cyan); }
 <!-- Page Header -->
 <div class="page-header wrap">
   <h1 class="page-title">Release Channels &amp; Downloads</h1>
-  <p class="page-sub">Dynamically fetched from GitHub releases. Download official standalone OS distribution packages for Linux and macOS.</p>
+  <p class="page-sub">Live GitHub distribution releases. Stable releases are recommended for general production use.</p>
 
   <div class="filter-bar">
     <button class="filter-btn active" onclick="filterReleases('all', this)">All Releases</button>
-    <button class="filter-btn" onclick="filterReleases('stable', this)">Stable Only</button>
-    <button class="filter-btn" onclick="filterReleases('preview', this)">Preview / Alpha</button>
+    <button class="filter-btn" onclick="filterReleases('stable', this)">Stable Releases</button>
+    <button class="filter-btn" onclick="filterReleases('prerelease', this)">Alpha / Beta Pre-releases</button>
   </div>
 </div>
 
 <!-- Dynamic Release Container -->
-<div class="wrap release-section" id="releases-container">
-  <div style="text-align:center;padding:3rem;color:var(--text-muted);font-family:var(--mono);">
-    Loading live release data...
+<div id="releases-container" class="wrap" style="min-height: 400px;">
+  <div style="padding: 3rem; text-align: center; color: var(--text-muted);">
+    Fetching live releases from GitHub API...
   </div>
 </div>
 
@@ -324,95 +355,74 @@ footer .flinks a:hover { color: var(--cyan); }
 </footer>
 
 <script>
-let allReleasesData = [];
+let allReleases = [];
 
 async function loadReleases() {
   const container = document.getElementById('releases-container');
   try {
-    // Attempt live fetch from GitHub API
     const res = await fetch('https://api.github.com/repos/sudsarkar13/vapor-ram/releases');
     if (res.ok) {
-      const ghReleases = await res.json();
-      allReleasesData = ghReleases.map(r => {
-        const isStable = !r.prerelease;
-        const tag = r.tag_name;
-        const linuxAsset = r.assets?.find(a => a.name.includes('linux'))?.browser_download_url || `https://github.com/sudsarkar13/vapor-ram/releases/download/${tag}/vapor-ram-${tag}-linux-x86_64.tar.gz`;
-        const macosAsset = r.assets?.find(a => a.name.includes('macos'))?.browser_download_url || `https://github.com/sudsarkar13/vapor-ram/releases/download/${tag}/vapor-ram-${tag}-macos.tar.gz`;
-
-        return {
-          version: tag,
-          date: r.published_at ? r.published_at.split('T')[0] : '2026-08-01',
-          channel: isStable ? 'stable' : 'alpha',
-          channel_label: isStable ? 'Stable Release' : 'Alpha Preview',
-          is_stable: isStable,
-          summary: r.body || 'Release features and performance updates.',
-          downloads: {
-            linux: { os: 'Linux x86_64', arch: 'AVX2 + FMA3 SIMD', url: linuxAsset },
-            macos: { os: 'macOS Apple Silicon', arch: 'ARM NEON + AMX', url: macosAsset }
-          }
-        };
-      });
-    } else {
-      throw new Error('GitHub API unavailable');
+      allReleases = await res.json();
+      renderReleases(allReleases);
+      return;
     }
   } catch (e) {
-    // Fallback to local generated assets/releases.json
-    try {
-      const fRes = await fetch('assets/releases.json');
-      if (fRes.ok) allReleasesData = await fRes.json();
-    } catch (e2) {
-      console.warn('Fallback failed:', e2);
-    }
+    console.warn("GitHub API error, using static fallback:", e);
   }
-
-  renderReleases(allReleasesData);
+  renderFallback();
 }
 
-function renderReleases(items) {
+function renderReleases(releases) {
   const container = document.getElementById('releases-container');
-  if (!items || items.length === 0) {
-    container.innerHTML = `<div style="padding:3rem;text-align:center;color:var(--text-muted);">No releases found.</div>`;
+  if (!releases || releases.length === 0) {
+    container.innerHTML = '<div style="padding: 3rem; text-align: center; color: var(--text-muted);">No releases found.</div>';
     return;
   }
 
-  container.innerHTML = items.map(item => `
-    <div class="release-card ${item.channel}">
-      <div class="release-header">
-        <div class="release-ver">
-          <span>${item.version}</span>
-          <span class="channel-badge ${item.channel}">${item.channel_label}</span>
-        </div>
-        <span class="release-date">Released: ${item.date}</span>
-      </div>
-      <div class="release-desc">
-        ${item.summary ? item.summary.replace(/###/g, '').replace(/\n/g, '<br>') : 'Official distribution package with low-memory C SIMD streamer and Web UI.'}
-      </div>
+  container.innerHTML = releases.map(rel => {
+    const isStable = !rel.prerelease;
+    const pubDate = new Date(rel.published_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    const renderedBody = window.marked ? marked.parse(rel.body || '') : (rel.body || '');
 
-      <div class="downloads-grid">
-        <div class="download-box">
-          <div class="os-info">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"></path></svg>
-            <div>
-              <div class="os-name">${item.downloads?.linux?.os || 'Linux x86_64'}</div>
-              <div class="os-spec">${item.downloads?.linux?.arch || 'AVX2 + FMA3 SIMD'} (135.5 MB)</div>
-            </div>
+    const assetsHtml = rel.assets && rel.assets.length > 0 ? rel.assets.map(asset => `
+      <div class="download-box">
+        <div>
+          <div class="os-name">${asset.name.includes('linux') ? 'Linux x86_64' : asset.name.includes('macos') ? 'macOS Apple Silicon' : asset.name}</div>
+          <div class="os-spec">${(asset.size / (1024 * 1024)).toFixed(1)} MB • ${asset.download_count || 0} downloads</div>
+        </div>
+        <a href="${asset.browser_download_url}" target="_blank" class="btn-ghost">Download .tar.gz</a>
+      </div>
+    `).join('') : `
+      <div class="download-box">
+        <div>
+          <div class="os-name">PyPI Wheel &amp; Source</div>
+          <div class="os-spec">pip install vapor-ram==${rel.tag_name.replace('v', '')}</div>
+        </div>
+        <a href="https://pypi.org/project/vapor-ram/${rel.tag_name.replace('v', '')}/" target="_blank" class="btn-ghost">View on PyPI</a>
+      </div>
+    `;
+
+    return `
+      <div class="release-card ${isStable ? 'stable' : 'prerelease'}" data-type="${isStable ? 'stable' : 'prerelease'}">
+        <div class="release-header">
+          <div class="release-ver">
+            <span>${rel.tag_name}</span>
+            <span class="channel-badge ${isStable ? 'stable' : 'prerelease'}">${isStable ? 'Stable Release' : 'Alpha Preview'}</span>
           </div>
-          <a href="${item.downloads?.linux?.url || '#'}" target="_blank" class="btn-ghost">Download .tar.gz</a>
+          <span class="release-date">Published: ${pubDate}</span>
         </div>
 
-        <div class="download-box">
-          <div class="os-info">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--indigo)" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"></path></svg>
-            <div>
-              <div class="os-name">${item.downloads?.macos?.os || 'macOS Apple Silicon'}</div>
-              <div class="os-spec">${item.downloads?.macos?.arch || 'ARM NEON + AMX'} (135.5 MB)</div>
-            </div>
-          </div>
-          <a href="${item.downloads?.macos?.url || '#'}" target="_blank" class="btn-ghost">Download .tar.gz</a>
+        <div class="markdown-body">
+          ${renderedBody}
+        </div>
+
+        <div class="downloads-title">Distribution Packages (.tar.gz)</div>
+        <div class="downloads-grid">
+          ${assetsHtml}
         </div>
       </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 function filterReleases(type, btn) {
@@ -420,15 +430,41 @@ function filterReleases(type, btn) {
   btn.classList.add('active');
 
   if (type === 'all') {
-    renderReleases(allReleasesData);
+    renderReleases(allReleases);
   } else if (type === 'stable') {
-    renderReleases(allReleasesData.filter(r => r.is_stable));
-  } else if (type === 'preview') {
-    renderReleases(allReleasesData.filter(r => !r.is_stable));
+    renderReleases(allReleases.filter(r => !r.prerelease));
+  } else if (type === 'prerelease') {
+    renderReleases(allReleases.filter(r => r.prerelease));
   }
 }
 
-document.addEventListener('DOMContentLoaded', loadReleases);
+function renderFallback() {
+  allReleases = [
+    {
+      tag_name: "v1.0.7-alpha.1",
+      prerelease: true,
+      published_at: "2026-08-02",
+      body: "### ✨ New Features & Enhancements\n- **Next.js + shadcn/ui Dashboard**: Rebuilt Web UI with Next.js, Tailwind CSS, and shadcn/ui.\n- **Dynamic Context Adjustment (`/system/context`)**: Scale context window between 512 and 8,192 tokens.\n- **Concurrent Slot Guarding**: Introduced slot locks and SSE connection resilience.",
+      assets: [
+        { name: "vapor-ram-v1.0.7-alpha.1-linux-x86_64.tar.gz", size: 142100000, download_count: 12, browser_download_url: "https://github.com/sudsarkar13/vapor-ram/releases/download/v1.0.7-alpha.1/vapor-ram-v1.0.7-alpha.1-linux-x86_64.tar.gz" },
+        { name: "vapor-ram-v1.0.7-alpha.1-macos.tar.gz", size: 142050000, download_count: 8, browser_download_url: "https://github.com/sudsarkar13/vapor-ram/releases/download/v1.0.7-alpha.1/vapor-ram-v1.0.7-alpha.1-macos.tar.gz" }
+      ]
+    },
+    {
+      tag_name: "v1.0.6",
+      prerelease: false,
+      published_at: "2026-08-01",
+      body: "### 🚀 Highlights & Features\n- **Apple Silicon MacBook Support**: Detects M1–M5 & A18 Pro chipsets and ARM NEON / AMX matrix extensions.\n- **Expanded 8,192 Max Output Limit**: Output ceiling expanded to 8,192 tokens.\n- **Linux Terminal Signal Shutdown**: Clean instant termination on `CTRL+C`.",
+      assets: [
+        { name: "vapor-ram-v1.0.6-linux-x86_64.tar.gz", size: 142100000, download_count: 45, browser_download_url: "https://github.com/sudsarkar13/vapor-ram/releases/download/v1.0.6/vapor-ram-v1.0.6-linux-x86_64.tar.gz" },
+        { name: "vapor-ram-v1.0.6-macos.tar.gz", size: 142050000, download_count: 32, browser_download_url: "https://github.com/sudsarkar13/vapor-ram/releases/download/v1.0.6/vapor-ram-v1.0.6-macos.tar.gz" }
+      ]
+    }
+  ];
+  renderReleases(allReleases);
+}
+
+loadReleases();
 </script>
 
 </body>

@@ -3,12 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VaporRAM — Dynamic Version History & Changelog</title>
-<meta name="description" content="Complete version history, release notes, bug fixes, and feature comparisons for VaporRAM. Dynamically updated from CHANGELOG.md.">
+<title>VaporRAM — Version History &amp; Detailed Changelog</title>
+<meta name="description" content="Complete version history, release notes, bug fixes, and feature comparisons for VaporRAM.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💨</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Marked.js Markdown Parser -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
 :root {
   --bg-dark: #0B0F19;
@@ -108,9 +110,28 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
   cursor: pointer;
 }
 
+.btn-ghost {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: .88rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-main);
+  padding: .45rem clamp(.8rem, 1.5vw, 1rem);
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  transition: all .25s ease;
+}
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
 /* Page Header */
 .page-header {
-  padding: 8.5rem 0 2.5rem;
+  padding: 8.5rem 0 3rem;
 }
 .page-title {
   font-size: clamp(2.2rem, 4.5vw, 3.5rem);
@@ -124,52 +145,32 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
   margin-top: .6rem;
 }
 
-.search-bar {
-  margin-top: 1.5rem;
-  max-width: 450px;
-}
-.search-input {
-  width: 100%;
-  background: rgba(17, 24, 39, 0.8);
-  border: 1px solid var(--border-light);
-  border-radius: 10px;
-  padding: .75rem 1rem;
-  color: var(--text-main);
-  font-family: var(--sans);
-  font-size: .95rem;
-  outline: none;
-  transition: border-color .2s;
-}
-.search-input:focus {
-  border-color: var(--cyan);
-}
-
 /* Timeline Layout */
 .timeline {
   position: relative;
   margin-top: 2rem;
   margin-bottom: 4rem;
-  padding-left: 2rem;
+  padding-left: 2.2rem;
   border-left: 2px solid var(--border-light);
 }
 .timeline-item {
   position: relative;
-  margin-bottom: 3rem;
+  margin-bottom: 3.5rem;
 }
 .timeline-item::before {
   content: '';
   position: absolute;
-  left: -2.55rem;
+  left: -2.75rem;
   top: .35rem;
-  width: 1rem;
-  height: 1rem;
+  width: 1.1rem;
+  height: 1.1rem;
   border-radius: 50%;
   background: var(--cyan);
-  box-shadow: 0 0 12px var(--cyan);
+  box-shadow: 0 0 14px var(--cyan);
 }
-.timeline-item.alpha::before {
+.timeline-item.prerelease::before {
   background: var(--amber);
-  box-shadow: 0 0 12px var(--amber);
+  box-shadow: 0 0 14px var(--amber);
 }
 
 .timeline-card {
@@ -178,6 +179,11 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
   border: 1px solid var(--border-light);
   border-radius: 16px;
   padding: 2rem;
+  transition: all .3s ease;
+}
+.timeline-card:hover {
+  border-color: var(--border-glow);
+  box-shadow: 0 10px 30px rgba(6, 182, 212, 0.1);
 }
 .timeline-header {
   display: flex;
@@ -207,33 +213,33 @@ nav .nl a.active { color: var(--cyan); font-weight: 600; }
   text-transform: uppercase;
 }
 .tag-badge.stable { background: rgba(16, 185, 129, 0.15); color: var(--emerald); border: 1px solid rgba(16, 185, 129, 0.3); }
-.tag-badge.alpha { background: rgba(245, 158, 11, 0.15); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.3); }
+.tag-badge.prerelease { background: rgba(245, 158, 11, 0.15); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.3); }
 
-.change-group { margin-top: 1.2rem; }
-.change-group-title {
-  font-size: 1rem;
-  font-weight: 700;
+/* Markdown Content Styling */
+.markdown-body {
+  color: var(--text-main);
+  font-size: .98rem;
+  line-height: 1.7;
+}
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
   color: var(--cyan);
+  margin-top: 1.2rem;
   margin-bottom: .6rem;
-  display: flex;
-  align-items: center;
-  gap: .5rem;
+  font-weight: 700;
 }
-.change-list { list-style: none; padding-left: 0; space-y: .5rem; }
-.change-list li {
-  position: relative;
-  padding-left: 1.4rem;
-  color: var(--text-muted);
-  font-size: .95rem;
-  margin-bottom: .5rem;
-  line-height: 1.6;
+.markdown-body ul, .markdown-body ol {
+  padding-left: 1.5rem;
+  margin-bottom: 1rem;
 }
-.change-list li::before {
-  content: '•';
-  position: absolute;
-  left: .3rem;
+.markdown-body li { margin-bottom: .4rem; color: var(--text-muted); }
+.markdown-body li strong { color: var(--text-main); }
+.markdown-body code {
+  font-family: var(--mono);
+  background: rgba(6, 182, 212, 0.12);
   color: var(--cyan);
-  font-weight: bold;
+  padding: .15rem .4rem;
+  border-radius: 4px;
+  font-size: .88rem;
 }
 
 /* Footer */
@@ -286,18 +292,14 @@ footer .flinks a:hover { color: var(--cyan); }
 <!-- Page Header -->
 <div class="page-header wrap">
   <h1 class="page-title">Version History &amp; Changelog</h1>
-  <p class="page-sub">Dynamically loaded version timeline detailing release highlights, features, bug fixes, and performance updates across all versions.</p>
-
-  <div class="search-bar">
-    <input type="text" id="search-input" class="search-input" placeholder="Search changelog (e.g. Next.js, macOS, O_DIRECT)..." oninput="filterChangelog()">
-  </div>
+  <p class="page-sub">Live timeline of official release notes, feature highlights, performance optimizations, and bug fixes fetched dynamically from GitHub.</p>
 </div>
 
-<!-- Timeline Section -->
+<!-- Dynamic Timeline Container -->
 <div class="wrap">
-  <div class="timeline" id="changelog-timeline">
-    <div style="padding:3rem;text-align:center;color:var(--text-muted);font-family:var(--mono);">
-      Loading changelog entries...
+  <div id="changelog-timeline" class="timeline">
+    <div style="padding: 3rem; text-align: center; color: var(--text-muted);">
+      Fetching live version changelog from GitHub API...
     </div>
   </div>
 </div>
@@ -320,91 +322,84 @@ footer .flinks a:hover { color: var(--cyan); }
 </footer>
 
 <script>
-let changelogData = [];
-
 async function loadChangelog() {
+  const container = document.getElementById('changelog-timeline');
   try {
-    const res = await fetch('assets/changelog.json');
+    const res = await fetch('https://api.github.com/repos/sudsarkar13/vapor-ram/releases');
     if (res.ok) {
-      changelogData = await res.json();
-    } else {
-      throw new Error('Local JSON unavailable');
+      const releases = await res.json();
+      renderChangelog(releases);
+      return;
     }
   } catch (e) {
-    console.warn('Failed loading assets/changelog.json:', e);
+    console.warn("GitHub API error, rendering fallback changelog:", e);
   }
-
-  renderChangelog(changelogData);
+  renderFallbackChangelog();
 }
 
-function renderChangelog(items) {
+function renderChangelog(releases) {
   const container = document.getElementById('changelog-timeline');
-  if (!items || items.length === 0) {
-    container.innerHTML = `<div style="padding:3rem;color:var(--text-muted);">No matching changelog entries found.</div>`;
+  if (!releases || releases.length === 0) {
+    container.innerHTML = '<div style="padding: 3rem; color: var(--text-muted);">No releases found.</div>';
     return;
   }
 
-  container.innerHTML = items.map(item => {
-    const isAlpha = item.channel === 'alpha';
-    const badgeClass = isAlpha ? 'alpha' : 'stable';
-    const badgeLabel = isAlpha ? 'Alpha Preview' : 'Stable Release';
-
-    let groupsHtml = '';
-    if (item.subsections && item.subsections.length > 0) {
-      groupsHtml = item.subsections.map(sub => `
-        <div class="change-group">
-          <div class="change-group-title">${sub.title}</div>
-          <ul class="change-list">
-            ${sub.bullets.map(b => `<li>${formatMarkdownText(b)}</li>`).join('')}
-          </ul>
-        </div>
-      `).join('');
-    } else if (item.raw) {
-      groupsHtml = `<div style="color:var(--text-muted);font-size:.95rem;margin-top:1rem;">${formatMarkdownText(item.raw)}</div>`;
-    }
+  container.innerHTML = releases.map(rel => {
+    const isStable = !rel.prerelease;
+    const pubDate = new Date(rel.published_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    const renderedMarkdown = window.marked ? marked.parse(rel.body || 'No detailed release notes provided.') : (rel.body || '');
 
     return `
-      <div class="timeline-item ${isAlpha ? 'alpha' : ''}">
+      <div class="timeline-item ${isStable ? 'stable' : 'prerelease'}">
         <div class="timeline-card">
           <div class="timeline-header">
             <div class="timeline-ver">
-              <span>${item.version}</span>
-              <span class="tag-badge ${badgeClass}">${badgeLabel}</span>
+              <span>${rel.tag_name}</span>
+              <span class="tag-badge ${isStable ? 'stable' : 'prerelease'}">${isStable ? 'Stable Release' : 'Alpha Preview'}</span>
             </div>
-            <span class="timeline-date">${item.date}</span>
+            <div style="display:flex;align-items:center;gap:1rem;">
+              <span class="timeline-date">${pubDate}</span>
+              <a href="${rel.html_url}" target="_blank" class="btn-ghost">View on GitHub</a>
+            </div>
           </div>
-          ${groupsHtml}
+
+          <div class="markdown-body">
+            ${renderedMarkdown}
+          </div>
         </div>
       </div>
     `;
   }).join('');
 }
 
-function formatMarkdownText(text) {
-  return text
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g, '<code class="mono" style="color:var(--cyan);">$1</code>');
+function renderFallbackChangelog() {
+  const fallbackReleases = [
+    {
+      tag_name: "v1.0.7-alpha.1",
+      prerelease: true,
+      published_at: "2026-08-02",
+      html_url: "https://github.com/sudsarkar13/vapor-ram/releases/tag/v1.0.7-alpha.1",
+      body: "### 🚀 Highlights & Features\n- **Next.js + shadcn/ui Dashboard Migration**: Rebuilt local Web UI with Next.js, Tailwind CSS, and shadcn/ui featuring real-time SSE streaming, syntax highlighting, and 0 end-user Node.js dependencies.\n- **Dynamic Context Window Endpoint (`/system/context`)**: Added runtime context adjustment endpoint to dynamically scale context window (`n_ctx`) between 512 and 8,192 tokens.\n- **Concurrent Slot Guarding**: Introduced slot locks (`_slot_begin` / `_slot_end`) and graceful SSE disconnect handling."
+    },
+    {
+      tag_name: "v1.0.6",
+      prerelease: false,
+      published_at: "2026-08-01",
+      html_url: "https://github.com/sudsarkar13/vapor-ram/releases/tag/v1.0.6",
+      body: "### 🚀 Highlights & Features\n- **Apple Silicon MacBook Support**: Expanded hardware inspector (`doctor.py`) to identify Apple Silicon M-Series chipsets (M1, M2, M3, M4, M5, A18 Pro) and ARM NEON / AMX matrix extensions.\n- **Expanded Max Output Limit**: Increased max generation token ceiling to 8,192 tokens.\n- **Linux Terminal Signal Clean Shutdown**: Updated HTTP server socket timeout and SIGINT signal handler to cleanly terminate immediately on CTRL+C."
+    },
+    {
+      tag_name: "v1.0.5",
+      prerelease: false,
+      published_at: "2026-07-31",
+      html_url: "https://github.com/sudsarkar13/vapor-ram/releases/tag/v1.0.5",
+      body: "### 🚀 Highlights & Features\n- **Double-Buffer O_DIRECT Layer Streamer**: Initial C engine release supporting 140 MB/layer POSIX unbuffered streaming with AVX2 SIMD matrix kernels."
+    }
+  ];
+  renderChangelog(fallbackReleases);
 }
 
-function filterChangelog() {
-  const q = document.getElementById('search-input').value.toLowerCase().trim();
-  if (!q) {
-    renderChangelog(changelogData);
-    return;
-  }
-
-  const filtered = changelogData.filter(item => {
-    const rawMatch = item.version.toLowerCase().includes(q) || item.date.includes(q);
-    const subMatch = item.subsections?.some(s => 
-      s.title.toLowerCase().includes(q) || s.bullets.some(b => b.toLowerCase().includes(q))
-    );
-    return rawMatch || subMatch;
-  });
-
-  renderChangelog(filtered);
-}
-
-document.addEventListener('DOMContentLoaded', loadChangelog);
+loadChangelog();
 </script>
 
 </body>
