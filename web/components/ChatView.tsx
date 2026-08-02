@@ -5,16 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/tokyo-night-dark.css";
-import {
-	Send,
-	Square,
-	Bot,
-	User,
-	Copy,
-	Check,
-	Sparkles,
-	Terminal,
-} from "lucide-react";
+import { Send, Square, Bot, User, Copy, Check, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { VaporMessage, streamChatCompletions } from "@/lib/api";
@@ -48,12 +39,16 @@ export function ChatView({ messages, setMessages, preset }: ChatViewProps) {
 	const abortControllerRef = useRef<AbortController | null>(null);
 	const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-	const scrollToBottom = () => {
-		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+	const scrollToBottom = (smooth = false) => {
+		messagesEndRef.current?.scrollIntoView({
+			behavior: smooth ? "smooth" : "auto",
+		});
 	};
 
 	useEffect(() => {
-		scrollToBottom();
+		// Snap to the latest message without per-frame smooth animation,
+		// which would visibly stutter while tokens stream in.
+		scrollToBottom(false);
 	}, [messages, isGenerating]);
 
 	// The "live" assistant bubble is the last message while it still has no
@@ -139,7 +134,14 @@ export function ChatView({ messages, setMessages, preset }: ChatViewProps) {
 				{messages.length === 0 ?
 					<div className="h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto py-12 space-y-5">
 						<div className="h-16 w-16 rounded-2xl bg-cyan-950/60 border border-cyan-500/30 flex items-center justify-center shadow-xl shadow-cyan-950/50">
-							<Sparkles className="h-8 w-8 text-cyan-400 animate-pulse" />
+							<span
+								aria-hidden="true"
+								className="text-4xl leading-none select-none"
+								style={{
+									filter: "drop-shadow(0 0 10px rgba(34,211,238,0.45))",
+								}}>
+								💨
+							</span>
 						</div>
 
 						<div>

@@ -7,7 +7,6 @@ import {
 	Activity,
 	Terminal,
 	Trash2,
-	Zap,
 	Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -49,7 +48,14 @@ export function Header({
 			<div className="flex h-11 items-center gap-3 px-3">
 				{/* Brand */}
 				<div className="flex shrink-0 items-center gap-1.5">
-					<Zap className="h-4 w-4 fill-cyan-400/20 text-cyan-400 animate-pulse" />
+					<span
+						aria-hidden="true"
+						className="text-base leading-none select-none"
+						style={{
+							filter: "drop-shadow(0 0 6px rgba(34,211,238,0.55))",
+						}}>
+						💨
+					</span>
 					<span className="text-sm font-extrabold tracking-tight text-cyan-400">
 						VaporRAM
 					</span>
