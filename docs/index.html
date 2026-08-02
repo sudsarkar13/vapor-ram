@@ -4,32 +4,31 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VaporRAM — Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it</title>
-<meta name="description" content="Stream google/gemma-4-E4B-it dense layers directly from NVMe SSD under a 1.5 GB RAM ceiling using AVX2/NEON SIMD GEMV and zero-copy O_DIRECT prefetching.">
+<meta name="description" content="Stream google/gemma-4-E4B-it dense layers directly from NVMe SSD under a 1.5 GB RAM ceiling using AVX2 SIMD GEMV and zero-copy O_DIRECT prefetching.">
 <meta property="og:title" content="VaporRAM — google/gemma-4-E4B-it under 1.5 GB RAM">
-<meta property="og:description" content="Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it under 1.5 GB RAM on Linux and macOS.">
+<meta property="og:description" content="Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it under 1.5 GB RAM.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://sudsarkar13.github.io/vapor-ram/">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg-dark: #030712;
-  --bg-card: rgba(15, 23, 42, 0.7);
-  --bg-card-hover: rgba(30, 41, 59, 0.85);
-  --border-glow: rgba(6, 182, 212, 0.25);
-  --border-light: rgba(255, 255, 255, 0.08);
-  --text-main: #F8FAFC;
-  --text-muted: #94A3B8;
+  --bg-dark: #0B0F19;
+  --bg-card: rgba(17, 24, 39, 0.75);
+  --bg-card-hover: rgba(31, 41, 55, 0.85);
+  --border-glow: rgba(59, 130, 246, 0.25);
+  --border-light: rgba(255, 255, 255, 0.1);
+  --text-main: #F9FAFB;
+  --text-muted: #9CA3AF;
   --cyan: #06B6D4;
   --indigo: #6366F1;
   --emerald: #10B981;
-  --purple: #A855F7;
   --amber: #F59E0B;
-  --sans: 'Plus Jakarta Sans', 'Inter', -apple-system, sans-serif;
+  --sans: 'Outfit', 'Inter', -apple-system, sans-serif;
   --mono: 'JetBrains Mono', monospace;
-  --maxw: 1240px;
+  --maxw: 1200px;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -46,23 +45,13 @@ body {
 a { color: inherit; text-decoration: none; }
 .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 4vw, 2.5rem); }
 
-/* Grid Background */
-.bg-grid {
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(rgba(6, 182, 212, 0.12) 1px, transparent 1px);
-  background-size: 32px 32px;
-  mask-image: radial-gradient(ellipse at 50% 20%, black 40%, transparent 80%);
-  pointer-events: none;
-}
-
 /* Navigation */
 nav {
   position: fixed;
   inset: 0 0 auto 0;
   z-index: 50;
-  background: rgba(3, 7, 18, 0.85);
-  backdrop-filter: blur(20px);
+  background: rgba(11, 15, 25, 0.85);
+  backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border-light);
 }
 nav .in {
@@ -70,37 +59,36 @@ nav .in {
   margin: 0 auto;
   display: flex;
   align-items: center;
-  padding: 1rem clamp(1.2rem, 4vw, 2.5rem);
+  padding: 1.1rem clamp(1.2rem, 4vw, 2.5rem);
 }
 nav .brand {
   display: flex;
   align-items: center;
   gap: .7rem;
-  font-weight: 900;
+  font-weight: 800;
   font-size: 1.5rem;
   letter-spacing: -.03em;
-  background: linear-gradient(135deg, #FFF 30%, var(--cyan), var(--indigo));
+  background: linear-gradient(135deg, var(--cyan), var(--indigo));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-nav .brand img { width: 32px; height: 32px; border-radius: 8px; }
+nav .brand img { width: 32px; height: 32px; border-radius: 6px; }
 nav .brand .vtag {
   background: rgba(6, 182, 212, 0.15);
   color: var(--cyan);
   border: 1px solid rgba(6, 182, 212, 0.3);
   font-size: .72rem;
-  padding: .2rem .55rem;
+  padding: .2rem .5rem;
   border-radius: 6px;
   font-family: var(--mono);
   -webkit-text-fill-color: var(--cyan);
-  font-weight: 700;
 }
 nav .nl {
   margin-left: auto;
   display: flex;
   gap: 2rem;
   align-items: center;
-  font-weight: 600;
+  font-weight: 500;
   font-size: .95rem;
 }
 nav .nl a:not(.btn-glow) { color: var(--text-muted); transition: color .2s; }
@@ -108,23 +96,23 @@ nav .nl a:not(.btn-glow):hover { color: var(--text-main); }
 
 .btn-glow {
   font-family: var(--sans);
-  font-weight: 700;
+  font-weight: 600;
   font-size: .92rem;
   display: inline-flex;
   align-items: center;
   gap: .5rem;
   background: linear-gradient(135deg, var(--cyan), var(--indigo));
-  color: #030712;
-  padding: .7rem 1.4rem;
-  border-radius: 10px;
-  box-shadow: 0 0 25px rgba(6, 182, 212, 0.35);
+  color: #fff;
+  padding: .65rem 1.3rem;
+  border-radius: 8px;
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.3);
   transition: all .25s ease;
   border: none;
   cursor: pointer;
 }
 .btn-glow:hover {
   transform: translateY(-2px);
-  box-shadow: 0 0 35px rgba(6, 182, 212, 0.6);
+  box-shadow: 0 0 30px rgba(6, 182, 212, 0.5);
 }
 
 .btn-ghost {
@@ -134,120 +122,90 @@ nav .nl a:not(.btn-glow):hover { color: var(--text-main); }
   display: inline-flex;
   align-items: center;
   gap: .5rem;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.05);
   color: var(--text-main);
-  padding: .7rem 1.4rem;
-  border-radius: 10px;
+  padding: .65rem 1.3rem;
+  border-radius: 8px;
   border: 1px solid var(--border-light);
   transition: all .25s ease;
 }
 .btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.2);
 }
 
 /* Hero */
 .hero {
-  padding: 9.5rem 0 4rem;
+  padding: 10rem 0 5rem;
   position: relative;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
 }
 .hero-glow {
   position: absolute;
-  top: 10%;
+  top: 5%;
   left: 50%;
   transform: translateX(-50%);
-  width: 700px;
-  height: 450px;
-  background: radial-gradient(circle, rgba(6, 182, 212, 0.15) 0%, rgba(99, 102, 241, 0.1) 40%, transparent 70%);
-  filter: blur(90px);
+  width: 600px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(6, 182, 212, 0.12) 0%, rgba(99, 102, 241, 0.08) 50%, transparent 70%);
+  filter: blur(80px);
   pointer-events: none;
 }
-.pill-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: .5rem;
-  background: rgba(6, 182, 212, 0.1);
-  border: 1px solid rgba(6, 182, 212, 0.3);
-  color: var(--cyan);
-  padding: .35rem clamp(.8rem, 2vw, 1.2rem);
-  border-radius: 9999px;
-  font-size: .85rem;
-  font-weight: 600;
-  margin-bottom: 1.5rem;
-}
 .hero h1 {
-  font-weight: 900;
-  font-size: clamp(2.6rem, 5.5vw, 4.8rem);
-  line-height: 1.08;
+  font-weight: 800;
+  font-size: clamp(2.8rem, 6vw, 4.8rem);
+  line-height: 1.05;
   letter-spacing: -.03em;
-  max-width: 960px;
+  max-width: 900px;
 }
 .hero h1 .gradient-text {
-  background: linear-gradient(135deg, #FFFFFF 20%, var(--cyan) 60%, var(--indigo) 100%);
+  background: linear-gradient(135deg, #FFF, var(--cyan), var(--indigo));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 .hero .lead-text {
-  font-size: clamp(1.1rem, 1.8vw, 1.3rem);
+  font-size: clamp(1.15rem, 1.8vw, 1.35rem);
   color: var(--text-muted);
-  max-width: 760px;
-  margin-top: 1.4rem;
+  max-width: 720px;
+  margin-top: 1.5rem;
   font-weight: 400;
 }
 .hero .cta-row {
   display: flex;
   gap: 1rem;
-  margin-top: 2.2rem;
+  margin-top: 2.5rem;
   flex-wrap: wrap;
-  justify-content: center;
 }
 
 /* Dashboard Image Preview */
 .dash-preview {
-  margin-top: 3.5rem;
-  width: 100%;
-  max-width: 1100px;
-  border-radius: 20px;
+  margin-top: 3rem;
+  border-radius: 16px;
   overflow: hidden;
   border: 1px solid var(--border-glow);
-  box-shadow: 0 0 50px rgba(6, 182, 212, 0.2);
-  position: relative;
-  background: #0B1120;
+  box-shadow: 0 0 40px rgba(6, 182, 212, 0.15);
 }
 .dash-preview img { width: 100%; height: auto; display: block; }
 
-/* Status Badges Grid */
+/* Status Badges */
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 1.2rem;
-  margin-top: 3.5rem;
-  width: 100%;
+  margin-top: 4rem;
 }
 .status-card {
   background: var(--bg-card);
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(16px);
   border: 1px solid var(--border-glow);
-  border-radius: 14px;
-  padding: 1.5rem;
+  border-radius: 12px;
+  padding: 1.4rem;
   position: relative;
   overflow: hidden;
-  text-align: left;
-  transition: all .3s ease;
-}
-.status-card:hover {
-  transform: translateY(-3px);
-  border-color: rgba(6, 182, 212, 0.5);
-  box-shadow: 0 10px 30px rgba(6, 182, 212, 0.15);
 }
 .status-card::before {
   content: '';
   position: absolute;
-  top: 0; left: 0; right: 0; height: 3px;
+  top: 0; left: 0; right: 0; height: 2px;
   background: linear-gradient(90deg, var(--cyan), var(--indigo));
 }
 .status-card .label {
@@ -255,27 +213,27 @@ nav .nl a:not(.btn-glow):hover { color: var(--text-main); }
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: .05em;
-  font-weight: 700;
+  font-weight: 600;
 }
 .status-card .value {
   font-family: var(--mono);
-  font-size: 1.85rem;
-  font-weight: 800;
+  font-size: 1.8rem;
+  font-weight: 700;
   color: var(--text-main);
   margin-top: .3rem;
 }
 
 /* Feature Grid */
-section { padding: 5.5rem 0; }
+section { padding: 6rem 0; }
 .section-title {
   font-size: clamp(2rem, 4vw, 3rem);
-  font-weight: 900;
+  font-weight: 800;
   letter-spacing: -.02em;
 }
 .section-sub {
   color: var(--text-muted);
   font-size: 1.1rem;
-  max-width: 640px;
+  max-width: 600px;
   margin-top: .5rem;
 }
 .cards-grid {
@@ -286,111 +244,74 @@ section { padding: 5.5rem 0; }
 }
 .card-glass {
   background: var(--bg-card);
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(16px);
   border: 1px solid var(--border-light);
-  border-radius: 18px;
-  padding: 2.2rem;
+  border-radius: 16px;
+  padding: 2rem;
   transition: all .3s ease;
 }
 .card-glass:hover {
   background: var(--bg-card-hover);
   border-color: var(--border-glow);
-  transform: translateY(-5px);
-  box-shadow: 0 15px 35px rgba(6, 182, 212, 0.1);
+  transform: translateY(-4px);
 }
 .card-icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 14px;
-  background: rgba(6, 182, 212, 0.12);
-  border: 1px solid rgba(6, 182, 212, 0.25);
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(6, 182, 212, 0.1);
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--cyan);
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.4rem;
 }
 .card-glass h3 {
   font-size: 1.4rem;
-  font-weight: 800;
+  font-weight: 700;
   margin-bottom: .6rem;
 }
 .card-glass p {
   color: var(--text-muted);
   font-size: 1rem;
-  line-height: 1.65;
+  line-height: 1.6;
 }
-
-/* Hardware Matrix Table */
-.matrix-container {
-  margin-top: 3rem;
-  background: var(--bg-card);
-  backdrop-filter: blur(20px);
-  border: 1px solid var(--border-glow);
-  border-radius: 18px;
-  overflow: hidden;
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  text-align: left;
-}
-th {
-  background: rgba(6, 182, 212, 0.1);
-  padding: 1.2rem 1.6rem;
-  font-size: .85rem;
-  text-transform: uppercase;
-  letter-spacing: .05em;
-  color: var(--cyan);
-  font-weight: 700;
-  border-bottom: 1px solid var(--border-light);
-}
-td {
-  padding: 1.2rem 1.6rem;
-  border-bottom: 1px solid var(--border-light);
-  font-size: .95rem;
-  color: var(--text-main);
-}
-tr:last-child td { border-bottom: none; }
-tr:hover td { background: rgba(255, 255, 255, 0.02); }
 
 /* Code Playground */
 .code-block {
-  background: #050914;
+  background: #060911;
   border: 1px solid var(--border-light);
-  border-radius: 14px;
-  padding: 1.6rem;
+  border-radius: 12px;
+  padding: 1.5rem;
   font-family: var(--mono);
   font-size: .95rem;
   line-height: 1.7;
   position: relative;
   overflow-x: auto;
   margin-top: 1.5rem;
-  box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
 }
-.code-block .cmd { color: var(--cyan); font-weight: 600; }
-.code-block .cmt { color: #64748B; }
+.code-block .cmd { color: var(--cyan); }
+.code-block .cmt { color: #6B7280; }
 .copy-btn {
   position: absolute;
-  top: 1rem;
-  right: 1rem;
+  top: .8rem;
+  right: .8rem;
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-muted);
   border: 1px solid var(--border-light);
-  border-radius: 8px;
-  padding: .4rem .8rem;
-  font-size: .8rem;
-  font-weight: 600;
+  border-radius: 6px;
+  padding: .35rem .7rem;
+  font-size: .78rem;
   cursor: pointer;
   transition: all .2s;
 }
-.copy-btn:hover { background: rgba(6, 182, 212, 0.2); color: var(--cyan); border-color: rgba(6, 182, 212, 0.4); }
+.copy-btn:hover { background: rgba(255, 255, 255, 0.15); color: var(--text-main); }
 
 /* Footer */
 footer {
   border-top: 1px solid var(--border-light);
-  padding: 4.5rem 0 3.5rem;
-  background: #02050E;
+  padding: 4rem 0 3rem;
+  background: #070A12;
 }
 footer .in {
   display: flex;
@@ -400,14 +321,12 @@ footer .in {
   gap: 1.5rem;
 }
 footer .copy { color: var(--text-muted); font-size: .95rem; }
-footer .flinks { display: flex; gap: 2rem; font-weight: 600; font-size: .95rem; }
+footer .flinks { display: flex; gap: 1.8rem; font-weight: 500; font-size: .95rem; }
 footer .flinks a { color: var(--text-muted); transition: color .2s; }
 footer .flinks a:hover { color: var(--cyan); }
 </style>
 </head>
 <body>
-
-<div class="bg-grid"></div>
 
 <!-- Navigation -->
 <nav>
@@ -417,7 +336,6 @@ footer .flinks a:hover { color: var(--cyan); }
     </div>
     <div class="nl">
       <a href="#features">Architecture</a>
-      <a href="#matrix">Hardware Matrix</a>
       <a href="#quickstart">Quickstart</a>
       <a href="https://pypi.org/project/vapor-ram/" target="_blank">PyPI</a>
       <a href="https://github.com/sudsarkar13/vapor-ram" target="_blank" class="btn-glow">GitHub Repo</a>
@@ -428,19 +346,12 @@ footer .flinks a:hover { color: var(--cyan); }
 <!-- Hero -->
 <div class="hero wrap">
   <div class="hero-glow"></div>
-
-  <div class="pill-badge">
-    <span>✨ Next.js + shadcn/ui Dashboard</span>
-    <span>•</span>
-    <span>🐧 Linux &amp; 🍎 macOS MacBook Supported</span>
-  </div>
-
   <h1>
     <span class="gradient-text">Zero Memory Pressure.</span><br>
     Stream Gemma 4 E4B-it under 1.5 GB RAM.
   </h1>
   <p class="lead-text">
-    VaporRAM is a high-performance C/C++ engine engineered to stream dense 8B model layers sequentially from NVMe SSDs directly into RAM, achieving lightning fast local inference under a strict 1.5 GB RAM ceiling on Linux and macOS MacBooks.
+    VaporRAM is a high-performance C/C++ engine engineered to stream dense 8B model layers sequentially from NVMe SSDs directly into RAM, achieving lightning fast local inference on consumer hardware.
   </p>
 
   <div class="cta-row">
@@ -454,7 +365,7 @@ footer .flinks a:hover { color: var(--cyan); }
   </div>
 
   <div class="dash-preview">
-    <img src="assets/dashboard.png" alt="VaporRAM Next.js Dashboard Interface Preview">
+    <img src="assets/dashboard.png" alt="VaporRAM Dashboard Interface Preview">
   </div>
 
   <div class="status-grid">
@@ -463,16 +374,16 @@ footer .flinks a:hover { color: var(--cyan); }
       <div class="value" style="color:var(--emerald);">&lt; 1.5 GB</div>
     </div>
     <div class="status-card">
-      <div class="label">Active Peak RSS</div>
+      <div class="label">Measured Peak RSS</div>
       <div class="value" style="color:var(--cyan);">142.32 MB</div>
     </div>
     <div class="status-card">
-      <div class="label">SIMD Engine Core</div>
+      <div class="label">AVX2 GEMV Core</div>
       <div class="value" style="color:var(--indigo);">204.7 GFLOPS</div>
     </div>
     <div class="status-card">
       <div class="label">RAM Budget Usage</div>
-      <div class="value" style="color:var(--purple);">9.5%</div>
+      <div class="value">9.5%</div>
     </div>
   </div>
 </div>
@@ -480,7 +391,7 @@ footer .flinks a:hover { color: var(--cyan); }
 <!-- Architecture Features -->
 <section id="features" class="wrap">
   <h2 class="section-title">Core Architecture</h2>
-  <p class="section-sub">Empirical optimization for low-spec laptops, MacBooks, and serverless deployments.</p>
+  <p class="section-sub">Empirical optimization for low-spec laptops and serverless deployments.</p>
 
   <div class="cards-grid">
     <div class="card-glass">
@@ -495,8 +406,8 @@ footer .flinks a:hover { color: var(--cyan); }
       <div class="card-icon">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
       </div>
-      <h3>AVX2 SIMD &amp; ARM NEON</h3>
-      <p>Tailored FMA3 &amp; AMX matrix-vector kernels multi-threaded with OpenMP to achieve <strong style="color:var(--emerald);">7.70x speedup</strong> over scalar CPU computation.</p>
+      <h3>AVX2 SIMD Accelerators</h3>
+      <p>Hand-crafted FMA3 matrix-vector kernels multi-threaded with OpenMP to achieve <strong style="color:var(--emerald);">7.70x speedup</strong> over scalar CPU computation.</p>
     </div>
 
     <div class="card-glass">
@@ -504,61 +415,18 @@ footer .flinks a:hover { color: var(--cyan); }
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M21 19c0 1.66-4 3-9 3s-9-1.34-9-3"></path></svg>
       </div>
       <h3>int8 Quantized KV Cache</h3>
-      <p>Attention Key and Value states are dynamically quantized to int8 with per-token scale factors, keeping context memory overhead under 250 MB.</p>
+      <p>Attention Key and Value states are dynamically quantized to int8 with per-token scale factors, reducing context RAM overhead to less than 250 MB.</p>
     </div>
   </div>
 </section>
 
-<!-- Hardware Matrix Section -->
-<section id="matrix" class="wrap">
-  <h2 class="section-title">Cross-Platform Hardware Matrix</h2>
-  <p class="section-sub">Tested and verified across Linux distributions and Apple Silicon MacBooks.</p>
-
-  <div class="matrix-container">
-    <table>
-      <thead>
-        <tr>
-          <th>Operating System</th>
-          <th>Processor Architecture</th>
-          <th>Vector Acceleration</th>
-          <th>RAM Ceiling Target</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><strong>Ubuntu / Debian / Fedora / Arch</strong></td>
-          <td>x86_64 CPU</td>
-          <td>AVX2 + FMA3 SIMD</td>
-          <td><span style="color:var(--emerald);font-weight:700;">&lt; 1.5 GB</span></td>
-          <td><span style="color:var(--emerald);font-weight:700;">● Native Supported</span></td>
-        </tr>
-        <tr>
-          <td><strong>macOS MacBooks (M1–M5 / A18 Pro)</strong></td>
-          <td>Apple Silicon (arm64)</td>
-          <td>ARM NEON + Apple AMX</td>
-          <td><span style="color:var(--emerald);font-weight:700;">&lt; 1.5 GB</span></td>
-          <td><span style="color:var(--emerald);font-weight:700;">● Native Supported</span></td>
-        </tr>
-        <tr>
-          <td><strong>WSL2 (Windows Subsystem for Linux)</strong></td>
-          <td>x86_64 Virtualized</td>
-          <td>AVX2 SIMD Passthrough</td>
-          <td><span style="color:var(--emerald);font-weight:700;">&lt; 1.5 GB</span></td>
-          <td><span style="color:var(--emerald);font-weight:700;">● Native Supported</span></td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<!-- Quickstart Guide -->
+<!-- Quickstart -->
 <section id="quickstart" class="wrap">
   <h2 class="section-title">Quickstart Guide</h2>
   <p class="section-sub">Deploy in seconds with Python or run as a standalone C runtime.</p>
 
-  <div style="margin-top:2.5rem;">
-    <h4 style="font-size:1.15rem;font-weight:700;color:var(--text-main);">1. Install from PyPI</h4>
+  <div style="margin-top:2rem;">
+    <h4 style="font-size:1.1rem;font-weight:600;color:var(--text-main);">1. Install from PyPI</h4>
     <div class="code-block">
       <button class="copy-btn" onclick="navigator.clipboard.writeText('pip install vapor-ram')">Copy</button>
       <span class="cmd">pip install vapor-ram</span>
@@ -566,16 +434,16 @@ footer .flinks a:hover { color: var(--cyan); }
   </div>
 
   <div style="margin-top:2rem;">
-    <h4 style="font-size:1.15rem;font-weight:700;color:var(--text-main);">2. Launch Next.js Web Dashboard</h4>
+    <h4 style="font-size:1.1rem;font-weight:600;color:var(--text-main);">2. Launch Web Dashboard</h4>
     <div class="code-block">
       <button class="copy-btn" onclick="navigator.clipboard.writeText('vapor web')">Copy</button>
       <span class="cmd">vapor web</span>
-      <br><span class="cmt"># Starts local server and opens Next.js interface at http://localhost:8000/</span>
+      <br><span class="cmt"># Starts local server and opens browser interface at http://localhost:8000/</span>
     </div>
   </div>
 
   <div style="margin-top:2rem;">
-    <h4 style="font-size:1.15rem;font-weight:700;color:var(--text-main);">3. Host LAN Gateway Server</h4>
+    <h4 style="font-size:1.1rem;font-weight:600;color:var(--text-main);">3. Host LAN Gateway Server</h4>
     <div class="code-block">
       <button class="copy-btn" onclick="navigator.clipboard.writeText('vapor serve --host 0.0.0.0 --port 8000')">Copy</button>
       <span class="cmd">vapor serve --host 0.0.0.0 --port 8000</span>
