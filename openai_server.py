@@ -455,7 +455,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             })
 
         # Trigger model weight downloader for GGUF model from Hugging Face
-        if path.endswith("/download_model") or path.endswith("/system/download_model"):
+        if any(path.endswith(suffix) for suffix in ("/download_model", "/system/download_model", "/models/download")):
             def run_dl():
                 global download_progress
                 sys.path.insert(0, os.path.join(HERE, "tools"))

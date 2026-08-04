@@ -73,6 +73,16 @@ def test_http_server():
     assert "response" in data, "Responses endpoint missing output"
     print(" -> /v1/responses Endpoint: PASSED ✓")
 
+    # 5. Model Download endpoint
+    req = urllib.request.Request(
+        "http://127.0.0.1:8888/v1/models/download",
+        data=json.dumps({"repo": "google/gemma-4-E4B-it"}).encode('utf-8'),
+        headers={"Content-Type": "application/json"}
+    )
+    res = urllib.request.urlopen(req)
+    assert res.status == 200, "/v1/models/download failed"
+    print(" -> /v1/models/download Endpoint: PASSED ✓")
+
 def test_web_dist():
     print("[Test 3/4] Testing Static Web UI Assets...")
     dist_dir = os.path.join(HERE, "web", "dist")
