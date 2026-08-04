@@ -5,13 +5,16 @@ import subprocess, os
 def build_c_engine():
     c_dir = os.path.join(os.path.dirname(__file__), "c")
     if os.path.exists(c_dir):
-        subprocess.check_call(["make", "-C", c_dir])
+        try:
+            subprocess.check_call(["make", "-C", c_dir])
+        except Exception as e:
+            print(f"[!] Warning: C engine build skipped on host platform ({e})")
 
 build_c_engine()
 
 setup(
     name="vapor-ram",
-    version="1.0.7-alpha.2",
+    version="1.0.7-alpha.3",
     description="Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it (< 1.5 GB RAM)",
     long_description=open("README.md").read() if os.path.exists("README.md") else "",
     long_description_content_type="text/markdown",

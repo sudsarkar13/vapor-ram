@@ -13,7 +13,7 @@ MODEL_DETECTION_UI_HTML = r"""
 <!-- VaporRAM Top Header Bar & Persistent Controls -->
 <div id="vapor-model-bar" style="position:sticky;top:0;left:0;width:100%;background:#071018;border-bottom:1px solid rgba(6,182,212,0.2);padding:0.4rem 1rem;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#f9fafb;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem;z-index:9999;box-sizing:border-box;">
   <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
-    <span style="font-weight:700;font-size:0.85rem;color:#06b6d4;letter-spacing:0.02em;">💨 VaporRAM v1.0.7-alpha.2</span>
+    <span style="font-weight:700;font-size:0.85rem;color:#06b6d4;letter-spacing:0.02em;">💨 VaporRAM v1.0.7-alpha.3</span>
     <span id="model-status-badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);font-size:0.72rem;padding:0.2rem 0.5rem;border-radius:5px;font-weight:600;">● Weights Loaded (google/gemma-4-E4B-it)</span>
     <span id="model-conn-badge" style="background:rgba(99,102,241,0.15);color:#818cf8;border:1px solid rgba(99,102,241,0.3);font-size:0.72rem;padding:0.2rem 0.5rem;border-radius:5px;font-weight:600;">NVMe O_DIRECT GGUF Streaming (RAM Ceiling < 1.5 GB)</span>
   </div>
@@ -437,11 +437,12 @@ def fix_index_html(html_path):
 def run():
     print("=== VaporRAM Web UI Transformer ===")
     assets_dir = os.path.join(DIST_DIR, "assets")
-    for f in os.listdir(assets_dir):
-        if f.endswith(".js"):
-            fix_js_bundle(os.path.join(assets_dir, f))
-        elif f.endswith(".css"):
-            fix_css_bundle(os.path.join(assets_dir, f))
+    if os.path.exists(assets_dir):
+        for f in os.listdir(assets_dir):
+            if f.endswith(".js"):
+                fix_js_bundle(os.path.join(assets_dir, f))
+            elif f.endswith(".css"):
+                fix_css_bundle(os.path.join(assets_dir, f))
     fix_index_html(os.path.join(DIST_DIR, "index.html"))
     print("===================================")
 

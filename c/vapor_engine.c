@@ -4,8 +4,12 @@
 #include <math.h>
 #include <time.h>
 #include <ctype.h>
+#if defined(__AVX2__) || defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
+#endif
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 #include "streaming_io.h"
 #include "kv_cache.h"
 
@@ -15,6 +19,7 @@
 
 // AVX2 optimized dot product for 4-bit / 8-bit layer computations
 static float avx2_vec_dot(const float *a, const float *b, int size) {
+#if defined(__AVX2__)
     __m256 sum = _mm256_setzero_ps();
     int i = 0;
     for (; i <= size - 8; i += 8) {
@@ -30,6 +35,13 @@ static float avx2_vec_dot(const float *a, const float *b, int size) {
         total += a[i] * b[i];
     }
     return total;
+#else
+    float total = 0.0f;
+    for (int i = 0; i < size; i++) {
+        total += a[i] * b[i];
+    }
+    return total;
+#endif
 }
 
 // Gemma RMSNorm layer normalization with custom scaling (+ 1.0f)
@@ -47,7 +59,7 @@ void rmsnorm(float *o, const float *x, const float *weight, int size) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "VaporRAM Engine v1.0.7-alpha.2 (Ultra-Low RAM SSD Streaming Engine for Gemma 4 E4B-it)\n");
+        fprintf(stderr, "VaporRAM Engine v1.0.7-alpha.3 (Ultra-Low RAM SSD Streaming Engine for Gemma 4 E4B-it)\n");
         fprintf(stderr, "Usage: %s <model_weights.bin> [prompt]\n", argv[0]);
         return 1;
     }
@@ -55,11 +67,15 @@ int main(int argc, char **argv) {
     const char *model_path = argv[1];
     const char *prompt = (argc >= 3) ? argv[2] : "Hello";
 
-    fprintf(stderr, "=== VaporRAM Engine v1.0.7-alpha.2 ===\n");
+    fprintf(stderr, "=== VaporRAM Engine v1.0.7-alpha.3 ===\n");
     fprintf(stderr, "[Target Model] google/gemma-4-E4B-it\n");
     fprintf(stderr, "[RAM Ceiling ] < 1.5 GB\n");
     fprintf(stderr, "[Streaming IO] O_DIRECT SSD Double-Buffer (140 MB/layer)\n");
-    fprintf(stderr, "[SIMD Engine ] AVX2 + FMA3 + OpenMP (%d threads)\n", omp_get_max_threads());
+    int num_threads = 1;
+#ifdef _OPENMP
+    num_threads = omp_get_max_threads();
+#endif
+    fprintf(stderr, "[SIMD Engine ] AVX2 + FMA3 + OpenMP (%d threads)\n", num_threads);
     fprintf(stderr, "[Input Prompt] \"%s\"\n\n", prompt);
 
     // Initialize Streaming IO

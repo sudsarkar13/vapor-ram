@@ -1,11 +1,25 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#if defined(__AVX2__) || defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
+#endif
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
 #define DIM 3072
 #define ITERATIONS 1000
+
+static double get_wtime(void) {
+#ifdef _OPENMP
+    return omp_get_wtime();
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+#endif
+}
 
 // Scalar GEMV
 float scalar_dot(const float *a, const float *b, int size) {
@@ -18,6 +32,7 @@ float scalar_dot(const float *a, const float *b, int size) {
 
 // AVX2 GEMV
 float avx2_dot(const float *a, const float *b, int size) {
+#if defined(__AVX2__)
     __m256 sum = _mm256_setzero_ps();
     int i = 0;
     for (; i <= size - 8; i += 8) {
@@ -33,13 +48,20 @@ float avx2_dot(const float *a, const float *b, int size) {
         total += a[i] * b[i];
     }
     return total;
+#else
+    return scalar_dot(a, b, size);
+#endif
 }
 
 int main() {
     printf("=== VaporRAM AVX2 SIMD Core Benchmark ===\n");
     printf(" Vector Dimension: %d floats (Gemma hidden size)\n", DIM);
     printf(" Iterations       : %d runs\n", ITERATIONS);
-    printf(" OpenMP Threads   : %d\n", omp_get_max_threads());
+    int num_threads = 1;
+#ifdef _OPENMP
+    num_threads = omp_get_max_threads();
+#endif
+    printf(" OpenMP Threads   : %d\n", num_threads);
     printf("------------------------------------------\n");
 
     float *a = (float*)aligned_alloc(32, DIM * sizeof(float));
@@ -51,18 +73,18 @@ int main() {
     }
 
     // Benchmark Scalar
-    double start_scalar = omp_get_wtime();
+    double start_scalar = get_wtime();
     for (int iter = 0; iter < ITERATIONS; iter++) {
         scalar_dot(a, b, DIM);
     }
-    double time_scalar = omp_get_wtime() - start_scalar;
+    double time_scalar = get_wtime() - start_scalar;
 
     // Benchmark AVX2
-    double start_avx2 = omp_get_wtime();
+    double start_avx2 = get_wtime();
     for (int iter = 0; iter < ITERATIONS; iter++) {
         avx2_dot(a, b, DIM);
     }
-    double time_avx2 = omp_get_wtime() - start_avx2;
+    double time_avx2 = get_wtime() - start_avx2;
 
     double gflops_scalar = (2.0 * DIM * ITERATIONS) / (time_scalar * 1e9);
     double gflops_avx2 = (2.0 * DIM * ITERATIONS) / (time_avx2 * 1e9);

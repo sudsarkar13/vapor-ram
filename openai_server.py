@@ -30,7 +30,7 @@ try:
 except Exception:
     total_ram_gb, avail_ram_gb = 16.0, 8.0
 
-VERSION = "1.0.7-alpha.2"
+VERSION = "1.0.7-alpha.3"
 current_model_path = DEFAULT_MODEL_DIR
 download_progress = {"status": "idle", "percent": 0, "message": "Ready"}
 completed_reset_timer = None

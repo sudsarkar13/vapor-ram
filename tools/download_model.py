@@ -50,7 +50,7 @@ def download_with_python_resumable(url, target_path, progress_callback=None):
     temp_path = target_path + ".tmp"
     existing_bytes = os.path.getsize(temp_path) if os.path.exists(temp_path) else 0
 
-    headers = {"User-Agent": "VaporRAM/1.0.2 GGUF Downloader"}
+    headers = {"User-Agent": "VaporRAM/1.0.7-alpha.3 GGUF Downloader"}
     if existing_bytes > 0:
         headers["Range"] = f"bytes={existing_bytes}-"
 
@@ -95,7 +95,7 @@ def run_full_download(progress_callback=None):
         try:
             if progress_callback:
                 progress_callback(5, "Fetching model metadata config.json...")
-            req = urllib.request.Request(CONFIG_URL, headers={"User-Agent": "VaporRAM/1.0.2"})
+            req = urllib.request.Request(CONFIG_URL, headers={"User-Agent": "VaporRAM/1.0.7-alpha.3"})
             with urllib.request.urlopen(req) as resp, open(TARGET_CONFIG_PATH, "wb") as f:
                 f.write(resp.read())
         except Exception as e:

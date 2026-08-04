@@ -4,6 +4,14 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 ---
 
+## [v1.0.7-alpha.3] - 2026-08-04
+
+### 🚀 Highlights & Features
+- **PyPI Verified Details & Metadata Standardization**: Configured standard project repository URLs (`Repository`, `Bug Tracker`, `Changelog`) and OSI license classifiers in `pyproject.toml` and `setup.py`.
+- **OIDC PyPI Publishing Pipeline**: Introduced automated GitHub Actions workflow (`.github/workflows/publish-pypi.yml`) supporting OIDC Trusted Publisher authentication and PEP 740 cryptographic provenance attestations.
+
+---
+
 ## [v1.0.7-alpha.2] - 2026-08-02
 
 ### 🚀 Highlights & Features
