@@ -30,8 +30,17 @@ setup(
         "llama-cpp-python>=0.2.0"
     ],
     classifiers=[
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Developers",
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: Apache Software License",
-        "Operating System :: POSIX :: Linux"
-    ]
+        "Operating System :: POSIX :: Linux",
+        "Operating System :: MacOS"
+    ],
+    project_urls={
+        "Homepage": "https://github.com/sudsarkar13/vapor-ram",
+        "Repository": "https://github.com/sudsarkar13/vapor-ram",
+        "Bug Tracker": "https://github.com/sudsarkar13/vapor-ram/issues",
+        "Changelog": "https://github.com/sudsarkar13/vapor-ram/blob/main/CHANGELOG.md",
+    }
 )
