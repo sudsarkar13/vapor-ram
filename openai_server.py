@@ -12,6 +12,7 @@ VAPOR_CONFIG_PATH = os.path.join(HERE, "vapor.json")
 # VaporRAM caps this to 8192 by default to stay under the 1.5 GB RAM ceiling;
 # power users with more RAM can override via vapor.json or POST /v1/system/context.
 MODEL_MAX_CONTEXT = 131072
+SAFE_GGUF_MAX_CONTEXT = 16384
 DEFAULT_CONTEXT_WINDOW = 8192
 
 try:
@@ -22,7 +23,7 @@ try:
 except Exception:
     n_ctx = DEFAULT_CONTEXT_WINDOW
     ram_ceiling_gb = 1.5
-n_ctx = max(512, min(n_ctx, MODEL_MAX_CONTEXT))
+n_ctx = max(512, min(n_ctx, SAFE_GGUF_MAX_CONTEXT))
 
 try:
     import doctor
@@ -604,17 +605,21 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                     subprocess.check_call([sys.executable, "-m", "pip", "install", "--break-system-packages", "llama-cpp-python"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     from llama_cpp import Llama
 
-                # Reuse cached model only if its KV budget still matches the active n_ctx;
-                # otherwise drop the old Llama so we free its KV before allocating a bigger one.
+                safe_n_ctx = min(n_ctx, 16384)
                 cached = llama_model_cache.get(gguf_file)
                 cached_ctx = getattr(cached, "_vapor_ctx_size", None) if cached is not None else None
-                if cached is None or cached_ctx != n_ctx:
+                if cached is None or cached_ctx != safe_n_ctx:
                     if cached is not None:
-                        sys.stderr.write(f"\033[36m[GGUF Engine] Reallocating KV cache from {cached_ctx} -> {n_ctx}\033[0m\n")
+                        sys.stderr.write(f"\033[36m[GGUF Engine] Reallocating KV cache from {cached_ctx} -> {safe_n_ctx}\033[0m\n")
                     else:
-                        sys.stderr.write(f"\033[36m[GGUF Engine] Loading real GGUF model: {gguf_file} (n_ctx={n_ctx})\033[0m\n")
-                    llama_model_cache[gguf_file] = Llama(model_path=gguf_file, n_ctx=n_ctx, n_threads=8, verbose=False)
-                    llama_model_cache[gguf_file]._vapor_ctx_size = n_ctx
+                        sys.stderr.write(f"\033[36m[GGUF Engine] Loading real GGUF model: {gguf_file} (n_ctx={safe_n_ctx})\033[0m\n")
+                    try:
+                        llama_model_cache[gguf_file] = Llama(model_path=gguf_file, n_ctx=safe_n_ctx, n_threads=8, verbose=False)
+                        llama_model_cache[gguf_file]._vapor_ctx_size = safe_n_ctx
+                    except Exception as alloc_err:
+                        sys.stderr.write(f"\033[33m[GGUF Engine] Primary context allocation failed ({alloc_err}); falling back to n_ctx=4096\033[0m\n")
+                        llama_model_cache[gguf_file] = Llama(model_path=gguf_file, n_ctx=4096, n_threads=8, verbose=False)
+                        llama_model_cache[gguf_file]._vapor_ctx_size = 4096
 
                 llm = llama_model_cache[gguf_file]
                 formatted_prompt = f"User: {prompt}\nAssistant:"

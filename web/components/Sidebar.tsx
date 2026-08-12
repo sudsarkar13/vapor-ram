@@ -126,8 +126,9 @@ function getRecommendedCeiling(availRamGb: number, totalRamGb: number): number {
 // Recommends max optimal context window fitting within available RAM budget
 function getRecommendedContext(availRamGb: number, ceilingGb: number): number {
 	const budgetGb = Math.min(availRamGb, ceilingGb);
-	// Find highest token option fitting safely within budget
+	// Find highest token option fitting safely within budget (capped at 16K max for streaming speed & memory safety)
 	const valid = CONTEXT_OPTIONS.filter((opt) => {
+		if (opt.value > 16384) return false;
 		const mem = computeMemory(opt.value, budgetGb, availRamGb);
 		return mem.fitsCeiling;
 	});

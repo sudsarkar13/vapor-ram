@@ -2,10 +2,5 @@
   "model_id": "google/gemma-4-E4B-it",
   "model_dir": "./models/gemma-4-E4B-it",
   "ram_ceiling_gb": 1.5,
-  "max_seq_len": 2048,
-  "host": "0.0.0.0",
-  "port": 8000,
-  "api_key": null,
-  "quant_type": "int8_kv_int4_weights",
-  "enable_thinking": true
+  "n_ctx": 8192
 }
