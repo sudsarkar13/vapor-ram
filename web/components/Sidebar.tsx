@@ -3,21 +3,17 @@
 import React, { useState } from "react";
 import {
 	HardDrive,
-	Server,
 	Download,
 	RefreshCw,
 	Power,
-	CheckCircle,
-	AlertTriangle,
 	Sliders,
-	ShieldCheck,
 	MemoryStick,
 	Gauge,
 	SlidersHorizontal,
+	Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import {
 	Select,
@@ -117,6 +113,27 @@ function computeMemory(ctx: number, ceilingGb: number, totalHostRamGb: number): 
 	};
 }
 
+// Recommends target RAM ceiling based on available free space & total host RAM
+function getRecommendedCeiling(availRamGb: number, totalRamGb: number): number {
+	if (availRamGb <= 2.5) return 1.5;
+	if (availRamGb <= 4.0) return 2.0;
+	if (availRamGb <= 6.0) return 3.0;
+	if (availRamGb <= 10.0) return 4.0;
+	if (availRamGb <= 20.0) return 8.0;
+	return Math.min(32.0, Math.floor(totalRamGb * 0.75));
+}
+
+// Recommends max optimal context window fitting within available RAM budget
+function getRecommendedContext(availRamGb: number, ceilingGb: number): number {
+	const budgetGb = Math.min(availRamGb, ceilingGb);
+	// Find highest token option fitting safely within budget
+	const valid = CONTEXT_OPTIONS.filter((opt) => {
+		const mem = computeMemory(opt.value, budgetGb, availRamGb);
+		return mem.fitsCeiling;
+	});
+	return valid.length > 0 ? valid[valid.length - 1].value : 8192;
+}
+
 export function Sidebar({
 	currentPreset,
 	setPreset,
@@ -125,7 +142,6 @@ export function Sidebar({
 }: SidebarProps) {
 	const [modelDir, setModelDir] = useState("./models/gemma-4-E4B-it");
 	const [isDownloading, setIsDownloading] = useState(false);
-	const [downloadMsg, setDownloadMsg] = useState("");
 	
 	const [nCtx, setNCtx] = useState<number>(progress?.n_ctx ?? 8192);
 	const [ramCeilingGb, setRamCeilingGb] = useState<number>(progress?.ram_ceiling_gb ?? 1.5);
@@ -134,6 +150,10 @@ export function Sidebar({
 
 	const totalHostRamGb = progress?.total_ram_gb ?? 16.0;
 	const availHostRamGb = progress?.avail_ram_gb ?? 8.0;
+
+	// Dynamic Recommendations
+	const recommendedCeiling = getRecommendedCeiling(availHostRamGb, totalHostRamGb);
+	const recommendedCtx = getRecommendedContext(availHostRamGb, ramCeilingGb);
 
 	// Sync from progress endpoint
 	React.useEffect(() => {
@@ -165,6 +185,12 @@ export function Sidebar({
 		if (res.ram_ceiling_gb) setRamCeilingGb(res.ram_ceiling_gb);
 		setCtxMsg(res.message || "Server settings updated and saved to vapor.json.");
 		onRefreshHealth();
+	};
+
+	const applyOptimalRecommendations = () => {
+		setRamCeilingGb(recommendedCeiling);
+		setNCtx(recommendedCtx);
+		handleConfigUpdate(recommendedCtx, recommendedCeiling);
 	};
 
 	const handleStop = async () => {
@@ -229,6 +255,20 @@ export function Sidebar({
 						<span>Target Ceiling: {ramCeilingGb.toFixed(1)} GB</span>
 					</div>
 				</div>
+
+				{/* Auto Recommendation Trigger */}
+				<div className="mt-3 pt-2.5 border-t border-cyan-500/20 flex items-center justify-between">
+					<div className="text-[10px] font-mono text-cyan-300 flex items-center gap-1">
+						<Sparkles className="h-3 w-3 text-amber-400 animate-pulse" />
+						Rec: {recommendedCeiling.toFixed(1)} GB Ceiling · {recommendedCtx >= 1024 ? `${recommendedCtx / 1024}K` : `${recommendedCtx}`} Context
+					</div>
+					<button
+						onClick={applyOptimalRecommendations}
+						disabled={ctxBusy}
+						className="text-[10px] bg-cyan-950 border border-cyan-500/40 hover:bg-cyan-900 text-cyan-200 px-2 py-0.5 rounded font-medium transition-colors">
+						Apply Optimal
+					</button>
+				</div>
 			</div>
 
 			{/* Target RAM Ceiling Selector */}
@@ -239,7 +279,7 @@ export function Sidebar({
 						RAM Ceiling Target
 					</label>
 					<Badge variant="outline" className="bg-emerald-950 text-emerald-400 border-emerald-500/30 text-[10px] font-mono">
-						{ramCeilingGb.toFixed(1)} GB
+						{ramCeilingGb.toFixed(1)} GB {ramCeilingGb === recommendedCeiling ? "★ Rec" : ""}
 					</Badge>
 				</div>
 
@@ -255,13 +295,13 @@ export function Sidebar({
 						size="sm"
 						className="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 h-9 px-2.5 focus:border-cyan-500/60">
 						<SelectValue placeholder="Select RAM Ceiling Target">
-							{`${ramCeilingGb.toFixed(1)} GB Ceiling Target`}
+							{`${ramCeilingGb.toFixed(1)} GB Ceiling Target ${ramCeilingGb === recommendedCeiling ? "(Recommended)" : ""}`}
 						</SelectValue>
 					</SelectTrigger>
 					<SelectContent className="bg-slate-900 border border-cyan-500/30 text-slate-100 rounded-lg shadow-2xl">
 						{CEILING_OPTIONS.map((opt) => (
 							<SelectItem key={opt.value} value={String(opt.value)} className="text-xs text-slate-200 hover:bg-cyan-500/20">
-								{opt.label}
+								{opt.label} {opt.value === recommendedCeiling ? "★ Recommended" : ""}
 							</SelectItem>
 						))}
 					</SelectContent>
@@ -295,7 +335,7 @@ export function Sidebar({
 							{(() => {
 								const opt = CONTEXT_OPTIONS.find((o) => o.value === nCtx);
 								const m = computeMemory(nCtx, ramCeilingGb, totalHostRamGb);
-								return `${opt ? opt.label : `${nCtx.toLocaleString()} tokens`} — ${formatBytes(m.totalBytes)} Peak RSS`;
+								return `${opt ? opt.label : `${nCtx.toLocaleString()} tokens`} ${nCtx === recommendedCtx ? "★" : ""} — ${formatBytes(m.totalBytes)} Peak RSS`;
 							})()}
 						</SelectValue>
 					</SelectTrigger>
@@ -303,6 +343,7 @@ export function Sidebar({
 						{CONTEXT_OPTIONS.map((opt) => {
 							const m = computeMemory(opt.value, ramCeilingGb, totalHostRamGb);
 							const fits = m.totalBytes <= m.ceilingBytes;
+							const isRec = opt.value === recommendedCtx;
 							return (
 								<SelectItem
 									key={opt.value}
@@ -311,6 +352,7 @@ export function Sidebar({
 									<span className="flex flex-col gap-0.5 leading-tight">
 										<span className="font-medium">
 											{opt.label}{" "}
+											{isRec && <span className="text-[10px] text-amber-400 font-semibold">★ Recommended Optimal</span>}
 											{!fits && (
 												<span className="ml-1 text-[10px] font-mono text-red-400">
 													&gt; {ramCeilingGb} GB
@@ -380,7 +422,6 @@ export function Sidebar({
 					<Button
 						onClick={async () => {
 							setIsDownloading(true);
-							setDownloadMsg("Downloading model weights...");
 							await downloadModel("google/gemma-4-E4B-it", modelDir);
 							setIsDownloading(false);
 						}}
