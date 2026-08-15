@@ -5,13 +5,27 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/tokyo-night-dark.css";
-import { Send, Square, Bot, User, Copy, Check, Terminal } from "lucide-react";
+import {
+	Send,
+	Square,
+	Bot,
+	User,
+	Copy,
+	Check,
+	Terminal,
+	Loader2,
+	AlertTriangle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { VaporMessage, streamChatCompletions } from "@/lib/api";
+import {
+	VaporMessage,
+	ModelState,
+	GenerationTimings,
+	streamChatCompletions,
+} from "@/lib/api";
 
-// Soft visual counters only — the engine's KV cache (8,192 tokens in
-// llama-cpp config) is the real ceiling, enforced server-side.
+// Soft visual counters only — the server-side KV cache is the real ceiling.
 const COUNTER_WARN_AT = 10000;
 const COUNTER_HARD_AT = 20000;
 
@@ -19,6 +33,8 @@ interface ChatViewProps {
 	messages: VaporMessage[];
 	setMessages: React.Dispatch<React.SetStateAction<VaporMessage[]>>;
 	preset: string;
+	modelState?: ModelState;
+	modelAvailable?: boolean;
 }
 
 // Three bouncing dots, staggered so they read as a wave.
@@ -32,12 +48,31 @@ function TypingDots() {
 	);
 }
 
-export function ChatView({ messages, setMessages, preset }: ChatViewProps) {
+/** Distinguishes "loading 4.7 GB of weights" from "generating tokens". */
+function LoadingWeights({ message }: { message: string }) {
+	return (
+		<div className="flex items-center gap-2 text-amber-300">
+			<Loader2 className="h-4 w-4 animate-spin shrink-0" />
+			<span className="text-xs font-mono leading-snug">{message}</span>
+		</div>
+	);
+}
+
+export function ChatView({
+	messages,
+	setMessages,
+	preset,
+	modelState,
+	modelAvailable = true,
+}: ChatViewProps) {
 	const [input, setInput] = useState("");
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+	const [lastTimings, setLastTimings] = useState<GenerationTimings | null>(null);
 	const abortControllerRef = useRef<AbortController | null>(null);
 	const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+	const isLoadingWeights = modelState?.status === "loading";
 
 	const scrollToBottom = (smooth = false) => {
 		messagesEndRef.current?.scrollIntoView({
@@ -80,7 +115,7 @@ export function ChatView({ messages, setMessages, preset }: ChatViewProps) {
 
 		await streamChatCompletions(
 			updatedMessages,
-			preset !== "default" ? preset : null,
+			preset,
 			(chunk) => {
 				setMessages((prev) => {
 					const next = [...prev];
@@ -93,7 +128,8 @@ export function ChatView({ messages, setMessages, preset }: ChatViewProps) {
 					return next;
 				});
 			},
-			() => {
+			(timings) => {
+				if (timings) setLastTimings(timings);
 				setIsGenerating(false);
 				abortControllerRef.current = null;
 			},
@@ -203,7 +239,11 @@ export function ChatView({ messages, setMessages, preset }: ChatViewProps) {
 								{msg.role === "user" ?
 									<p className="whitespace-pre-wrap">{msg.content}</p>
 								: isStreamingAssistant(idx) && !msg.content ?
-									<TypingDots />
+									isLoadingWeights ?
+										<LoadingWeights
+											message={modelState?.message || "Loading model weights…"}
+										/>
+									:	<TypingDots />
 								: msg.content ?
 									<div className="prose prose-invert prose-sm max-w-none prose-headings:text-cyan-300 prose-headings:font-bold prose-a:text-cyan-400 prose-code:text-cyan-300 prose-code:bg-slate-950 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-pre:bg-slate-950 prose-pre:border prose-pre:border-slate-800">
 										<ReactMarkdown
@@ -241,7 +281,31 @@ export function ChatView({ messages, setMessages, preset }: ChatViewProps) {
 
 			{/* Input Form Bar */}
 			<div className="p-4 border-t border-slate-800 bg-slate-950/90 backdrop-blur-md">
-				<div className="max-w-4xl mx-auto">
+				<div className="max-w-4xl mx-auto space-y-2">
+					{!modelAvailable && (
+						<div className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200">
+							<AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+							No GGUF weights found. Use{" "}
+							<span className="font-mono font-semibold">HF Download</span> in the
+							sidebar, or run{" "}
+							<code className="font-mono">./vapor download</code>.
+						</div>
+					)}
+
+					{lastTimings?.completion_tokens != null && !isGenerating && (
+						<div className="flex items-center gap-3 text-[10px] font-mono text-slate-500 justify-end">
+							<span>{lastTimings.completion_tokens} tokens</span>
+							{lastTimings.tokens_per_second != null && (
+								<span>{lastTimings.tokens_per_second.toFixed(1)} tok/s</span>
+							)}
+							{lastTimings.first_token_ms != null && (
+								<span>
+									first token {(lastTimings.first_token_ms / 1000).toFixed(1)}s
+								</span>
+							)}
+						</div>
+					)}
+
 					<div
 						className={`relative flex items-end gap-2 rounded-xl border bg-slate-900/80 pl-3 pr-2 py-2 transition-colors ${
 							input.trim() ?

@@ -26,6 +26,8 @@ interface HeaderProps {
 	isOnline: boolean;
 	activeModel: string;
 	slots?: VaporSlots;
+	/** Engine version reported by /health — never hardcoded. */
+	version?: string;
 }
 
 const TABS: { id: ActiveTab; label: string; Icon: typeof MessageSquare }[] = [
@@ -42,6 +44,7 @@ export function Header({
 	isOnline,
 	activeModel,
 	slots,
+	version,
 }: HeaderProps) {
 	return (
 		<header className="sticky top-0 z-50 w-full border-b border-cyan-500/20 bg-slate-950/90 backdrop-blur-md">
@@ -62,7 +65,7 @@ export function Header({
 					<Badge
 						variant="outline"
 						className="h-5 px-1.5 text-[10px] font-mono font-semibold uppercase tracking-wider text-cyan-400/90 border-cyan-500/40 bg-cyan-950/60">
-						v1.0.6
+						{version ? `v${version}` : "—"}
 					</Badge>
 				</div>
 

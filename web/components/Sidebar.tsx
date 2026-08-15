@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
 	HardDrive,
 	Download,
@@ -11,6 +11,9 @@ import {
 	Gauge,
 	SlidersHorizontal,
 	Sparkles,
+	CheckCircle2,
+	AlertTriangle,
+	Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +29,11 @@ import {
 	stopServer,
 	downloadModel,
 	updateServerConfig,
+	setModelPath,
+	fetchPresets,
 	SystemProgress,
+	VaporPreset,
+	ModelArchitecture,
 } from "@/lib/api";
 
 interface SidebarProps {
@@ -36,7 +43,7 @@ interface SidebarProps {
 	onRefreshHealth: () => void;
 }
 
-const CONTEXT_OPTIONS = [
+const ALL_CONTEXT_OPTIONS = [
 	{ value: 1024, label: "1K · minimal" },
 	{ value: 2048, label: "2K · tight" },
 	{ value: 4096, label: "4K · default" },
@@ -57,24 +64,26 @@ const CEILING_OPTIONS = [
 	{ value: 32.0, label: "32.0 GB · Enterprise" },
 ];
 
-// Gemma 4 E4B-it memory parameters
-const MODEL_NUM_LAYERS = 42;
-const MODEL_NUM_KV_HEADS = 2;
-const MODEL_HEAD_DIM = 256;
-const MODEL_NUM_KV_SHARED_LAYERS = 18;
+// Fallbacks only — real values arrive from the server's `architecture` block,
+// which is read from the active model's config.json.
+const FALLBACK_ARCH: ModelArchitecture = {
+	n_layers: 42,
+	hidden_dim: 2560,
+	n_heads: 8,
+	n_kv_heads: 2,
+	head_dim: 256,
+	kv_shared_layers: 18,
+	sliding_window: 512,
+	layer_buffer_mb: 140,
+};
+
 const BYTES_PER_KV_ELEMENT = 1; // int8 K/V
 const KV_SCALE_OVERHEAD = 1.125;
-const ENGINE_BASE_RSS_GB = 0.28; // 280 MB layer double buffer + python glue
-const MODEL_RSS_RESIDENT_GB = 0.20; // resident mmap pages
 
-function kvBytesPerToken(): number {
-	const uniqueKvLayers = MODEL_NUM_LAYERS - MODEL_NUM_KV_SHARED_LAYERS;
-	const elementsPerToken = uniqueKvLayers * MODEL_NUM_KV_HEADS * MODEL_HEAD_DIM;
-	return elementsPerToken * BYTES_PER_KV_ELEMENT * KV_SCALE_OVERHEAD;
-}
-
-function kvBytes(ctx: number): number {
-	return ctx * kvBytesPerToken();
+function kvBytes(ctx: number, arch: ModelArchitecture): number {
+	const uniqueKvLayers = Math.max(1, arch.n_layers - arch.kv_shared_layers);
+	const elementsPerToken = uniqueKvLayers * arch.n_kv_heads * arch.head_dim;
+	return ctx * elementsPerToken * BYTES_PER_KV_ELEMENT * KV_SCALE_OVERHEAD;
 }
 
 function formatBytes(bytes: number): string {
@@ -83,37 +92,27 @@ function formatBytes(bytes: number): string {
 	return `${(bytes / 1024).toFixed(0)} KB`;
 }
 
-interface MemBreakdown {
-	kvBytes: number;
-	engineBaseBytes: number;
-	weightsBytes: number;
-	totalBytes: number;
-	ceilingBytes: number;
-	fitsCeiling: boolean;
-	fitsHost: boolean;
-	headroomBytes: number;
-}
-
-function computeMemory(ctx: number, ceilingGb: number, totalHostRamGb: number): MemBreakdown {
-	const kv = kvBytes(ctx);
-	const engine = ENGINE_BASE_RSS_GB * 1024 ** 3;
-	const weights = MODEL_RSS_RESIDENT_GB * 1024 ** 3;
-	const total = kv + engine + weights;
+/** Projected KV growth on top of whatever the process already occupies. */
+function projectMemory(
+	ctx: number,
+	ceilingGb: number,
+	measuredRssMb: number | null,
+	arch: ModelArchitecture,
+) {
+	const kv = kvBytes(ctx, arch);
+	const measured = (measuredRssMb ?? 0) * 1024 ** 2;
+	const projected = measured > 0 ? measured + kv : kv;
 	const ceiling = ceilingGb * 1024 ** 3;
-	const host = totalHostRamGb * 1024 ** 3;
 	return {
 		kvBytes: kv,
-		engineBaseBytes: engine,
-		weightsBytes: weights,
-		totalBytes: total,
+		measuredBytes: measured,
+		projectedBytes: projected,
 		ceilingBytes: ceiling,
-		fitsCeiling: total <= ceiling,
-		fitsHost: total <= host,
-		headroomBytes: ceiling - total,
+		fitsCeiling: projected <= ceiling,
+		headroomBytes: ceiling - projected,
 	};
 }
 
-// Recommends target RAM ceiling based on available free space & total host RAM
 function getRecommendedCeiling(availRamGb: number, totalRamGb: number): number {
 	if (availRamGb <= 2.5) return 1.5;
 	if (availRamGb <= 4.0) return 2.0;
@@ -123,245 +122,276 @@ function getRecommendedCeiling(availRamGb: number, totalRamGb: number): number {
 	return Math.min(32.0, Math.floor(totalRamGb * 0.75));
 }
 
-// Recommends max optimal context window fitting within available RAM budget
-function getRecommendedContext(availRamGb: number, ceilingGb: number): number {
-	const budgetGb = Math.min(availRamGb, ceilingGb);
-	// Find highest token option fitting safely within budget (capped at 16K max for streaming speed & memory safety)
-	const valid = CONTEXT_OPTIONS.filter((opt) => {
-		if (opt.value > 16384) return false;
-		const mem = computeMemory(opt.value, budgetGb, availRamGb);
-		return mem.fitsCeiling;
-	});
-	return valid.length > 0 ? valid[valid.length - 1].value : 8192;
-}
-
 export function Sidebar({
 	currentPreset,
 	setPreset,
 	progress,
 	onRefreshHealth,
 }: SidebarProps) {
-	const [modelDir, setModelDir] = useState("./models/gemma-4-E4B-it");
+	const [modelDir, setModelDir] = useState("");
+	const [modelDirTouched, setModelDirTouched] = useState(false);
 	const [isDownloading, setIsDownloading] = useState(false);
-	
-	const [nCtx, setNCtx] = useState<number>(progress?.n_ctx ?? 8192);
-	const [ramCeilingGb, setRamCeilingGb] = useState<number>(progress?.ram_ceiling_gb ?? 1.5);
-	const [ctxBusy, setCtxBusy] = useState(false);
-	const [ctxMsg, setCtxMsg] = useState("");
+	const [presets, setPresets] = useState<VaporPreset[]>([]);
 
+	const [nCtx, setNCtx] = useState<number>(8192);
+	const [ramCeilingGb, setRamCeilingGb] = useState<number>(1.5);
+	const [busy, setBusy] = useState(false);
+	const [statusMsg, setStatusMsg] = useState("");
+	const [statusIsError, setStatusIsError] = useState(false);
+
+	const arch = progress?.architecture ?? FALLBACK_ARCH;
 	const totalHostRamGb = progress?.total_ram_gb ?? 16.0;
 	const availHostRamGb = progress?.avail_ram_gb ?? 8.0;
+	const measuredRssMb = progress?.process_rss_mb ?? null;
+	const safeMaxCtx = progress?.safe_max_context ?? 16384;
+	const download = progress?.download_progress;
+	const modelState = progress?.model_state;
 
-	// Dynamic Recommendations
+	// The engine refuses anything above safe_max_context, so don't offer it.
+	const contextOptions = ALL_CONTEXT_OPTIONS.filter((o) => o.value <= safeMaxCtx);
+
 	const recommendedCeiling = getRecommendedCeiling(availHostRamGb, totalHostRamGb);
-	const recommendedCtx = getRecommendedContext(availHostRamGb, ramCeilingGb);
+	const recommendedCtx = (() => {
+		const budget = Math.min(availHostRamGb, ramCeilingGb);
+		const fitting = contextOptions.filter(
+			(o) => projectMemory(o.value, budget, measuredRssMb, arch).fitsCeiling,
+		);
+		return fitting.length ? fitting[fitting.length - 1].value : contextOptions[0]?.value ?? 4096;
+	})();
 
-	// Sync from progress endpoint
-	React.useEffect(() => {
+	useEffect(() => {
+		fetchPresets().then((p) => {
+			if (p.length) setPresets(p);
+		});
+	}, []);
+
+	// Mirror authoritative server state. The model directory only syncs while the
+	// user hasn't started editing it, so typing is never overwritten mid-keystroke.
+	useEffect(() => {
 		if (progress?.n_ctx) setNCtx(progress.n_ctx);
 		if (progress?.ram_ceiling_gb) setRamCeilingGb(progress.ram_ceiling_gb);
-	}, [progress?.n_ctx, progress?.ram_ceiling_gb]);
+		if (progress?.model_path && !modelDirTouched) setModelDir(progress.model_path);
+	}, [progress?.n_ctx, progress?.ram_ceiling_gb, progress?.model_path, modelDirTouched]);
 
-	const handleConfigUpdate = async (updatedCtx?: number, updatedCeilingGb?: number) => {
-		const targetCtx = updatedCtx ?? nCtx;
-		const targetCeiling = updatedCeilingGb ?? ramCeilingGb;
+	const report = (msg: string, isError = false) => {
+		setStatusMsg(msg);
+		setStatusIsError(isError);
+	};
 
-		setCtxBusy(true);
-		setCtxMsg("Saving server settings & reallocating cache…");
+	const saveSetting = useCallback(
+		async (params: { n_ctx?: number; ram_ceiling_gb?: number }) => {
+			setBusy(true);
+			report("Applying settings…");
+			// model_dir is deliberately omitted: it has its own explicit action, so
+			// changing the context window can never overwrite the active model path.
+			const res = await updateServerConfig(params);
+			setBusy(false);
+			if (!res) return report("Server unreachable — settings not applied.", true);
+			if (res.n_ctx) setNCtx(res.n_ctx);
+			if (res.ram_ceiling_gb) setRamCeilingGb(res.ram_ceiling_gb);
+			report(res.message || "Settings saved to vapor.json.", !!res.warnings?.length);
+			onRefreshHealth();
+		},
+		[onRefreshHealth],
+	);
 
-		const res = await updateServerConfig({
-			n_ctx: targetCtx,
-			ram_ceiling_gb: targetCeiling,
-			model_dir: modelDir,
-		});
-
-		setCtxBusy(false);
-
-		if (!res) {
-			setCtxMsg("Failed to update server configuration.");
-			return;
-		}
-
-		if (res.n_ctx) setNCtx(res.n_ctx);
-		if (res.ram_ceiling_gb) setRamCeilingGb(res.ram_ceiling_gb);
-		setCtxMsg(res.message || "Server settings updated and saved to vapor.json.");
+	const applyModelDir = async () => {
+		setBusy(true);
+		report("Validating model directory…");
+		const res = await setModelPath(modelDir);
+		setBusy(false);
+		setModelDirTouched(false);
+		if (!res) return report("Server unreachable.", true);
+		report(res.message || "Model directory updated.", !!res.error);
 		onRefreshHealth();
 	};
 
-	const applyOptimalRecommendations = () => {
-		setRamCeilingGb(recommendedCeiling);
-		setNCtx(recommendedCtx);
-		handleConfigUpdate(recommendedCtx, recommendedCeiling);
+	const startDownload = async () => {
+		setIsDownloading(true);
+		report("Requesting GGUF download…");
+		const res = await downloadModel(undefined, modelDir || undefined);
+		if (!res) {
+			setIsDownloading(false);
+			return report("Could not start download.", true);
+		}
+		report(res.message || "Download started.");
+		onRefreshHealth();
 	};
 
+	// The button stays in its downloading state until the server says otherwise,
+	// rather than resetting the moment the POST returns.
+	useEffect(() => {
+		if (download && download.status !== "downloading") setIsDownloading(false);
+	}, [download?.status]);
+
 	const handleStop = async () => {
-		if (confirm("Are you sure you want to stop the VaporRAM engine server?")) {
+		if (confirm("Stop the VaporRAM engine server?")) {
 			await stopServer();
 			onRefreshHealth();
 		}
 	};
 
-	const mem = computeMemory(nCtx, ramCeilingGb, totalHostRamGb);
-	const maxCtx = progress?.model_max_context ?? 131072;
-
-	const breakdown = [
-		{
-			label: "int8 KV cache",
-			value: mem.kvBytes,
-			color: "bg-amber-400",
-		},
-		{
-			label: "Engine + O_DIRECT buffer",
-			value: mem.engineBaseBytes,
-			color: "bg-cyan-400",
-		},
-		{
-			label: "GGUF weights (resident)",
-			value: mem.weightsBytes,
-			color: "bg-indigo-400",
-		},
-	];
+	const mem = projectMemory(nCtx, ramCeilingGb, measuredRssMb, arch);
+	const downloadActive = download?.status === "downloading" || isDownloading;
+	const ramUsedPct = measuredRssMb
+		? Math.min(100, (measuredRssMb / (totalHostRamGb * 1024)) * 100)
+		: 0;
 
 	return (
 		<aside className="w-full md:w-80 flex-shrink-0 bg-slate-950/80 border-b md:border-b-0 md:border-r border-cyan-500/20 p-4 space-y-4 overflow-y-auto font-sans text-slate-200">
-			{/* Memory Telemetry & System RAM Header */}
+			{/* Live memory telemetry */}
 			<div className="rounded-xl border border-cyan-500/30 bg-slate-900/60 p-4 shadow-lg shadow-cyan-950/20">
 				<div className="flex items-center justify-between mb-2">
 					<span className="text-xs font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
-						<MemoryStick className="h-4 w-4 text-cyan-400" />
+						<MemoryStick className="h-4 w-4" />
 						System Memory Inspector
 					</span>
-					<Badge variant="outline" className="bg-cyan-950 text-cyan-300 border-cyan-500/40 text-[10px] font-mono">
-						Host: {totalHostRamGb.toFixed(1)} GB Total
+					<Badge
+						variant="outline"
+						className="bg-cyan-950 text-cyan-300 border-cyan-500/40 text-[10px] font-mono">
+						Host: {totalHostRamGb.toFixed(1)} GB
 					</Badge>
 				</div>
 
 				<div className="space-y-2 mt-3">
 					<div className="flex justify-between text-xs font-mono">
-						<span className="text-slate-400">Projected Peak RSS:</span>
-						<span className={`font-bold ${mem.fitsCeiling ? "text-emerald-400" : "text-red-400"}`}>
-							{formatBytes(mem.totalBytes)}
+						<span className="text-slate-400">Measured engine RSS:</span>
+						<span className="font-bold text-cyan-300">
+							{measuredRssMb !== null ? `${(measuredRssMb / 1024).toFixed(2)} GB` : "—"}
 						</span>
 					</div>
 
-					<div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-cyan-500/20 flex">
+					<div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-cyan-500/20">
 						<div
-							className={`h-full ${mem.fitsCeiling ? "bg-gradient-to-r from-cyan-500 to-emerald-400" : "bg-red-500"} transition-all duration-500 rounded-full`}
-							style={{ width: `${Math.min(100, (mem.totalBytes / mem.ceilingBytes) * 100)}%` }}
+							className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 transition-all duration-500 rounded-full"
+							style={{ width: `${ramUsedPct}%` }}
 						/>
 					</div>
 
 					<div className="flex justify-between text-[11px] font-mono text-slate-500">
-						<span>Available Free: {availHostRamGb.toFixed(1)} GB</span>
-						<span>Target Ceiling: {ramCeilingGb.toFixed(1)} GB</span>
+						<span>Free: {availHostRamGb.toFixed(1)} GB</span>
+						<span>Ceiling target: {ramCeilingGb.toFixed(1)} GB</span>
 					</div>
+
+					{measuredRssMb !== null && measuredRssMb / 1024 > ramCeilingGb && (
+						<p className="text-[10px] leading-snug text-amber-400 flex items-start gap-1">
+							<AlertTriangle className="h-3 w-3 mt-px shrink-0" />
+							Engine RSS exceeds the ceiling target. The ceiling is a planning
+							guide — llama.cpp maps the full GGUF and is not capped by it.
+						</p>
+					)}
 				</div>
 
-				{/* Auto Recommendation Trigger */}
-				<div className="mt-3 pt-2.5 border-t border-cyan-500/20 flex items-center justify-between">
-					<div className="text-[10px] font-mono text-cyan-300 flex items-center gap-1">
-						<Sparkles className="h-3 w-3 text-amber-400 animate-pulse" />
-						Rec: {recommendedCeiling.toFixed(1)} GB Ceiling · {recommendedCtx >= 1024 ? `${recommendedCtx / 1024}K` : `${recommendedCtx}`} Context
+				<div className="mt-3 pt-2.5 border-t border-cyan-500/20 flex items-center justify-between gap-2">
+					<div className="text-[10px] font-mono text-cyan-300 flex items-center gap-1 min-w-0">
+						<Sparkles className="h-3 w-3 text-amber-400 shrink-0" />
+						<span className="truncate">
+							Rec: {recommendedCeiling.toFixed(1)} GB · {recommendedCtx / 1024}K ctx
+						</span>
 					</div>
 					<button
-						onClick={applyOptimalRecommendations}
-						disabled={ctxBusy}
-						className="text-[10px] bg-cyan-950 border border-cyan-500/40 hover:bg-cyan-900 text-cyan-200 px-2 py-0.5 rounded font-medium transition-colors">
+						onClick={() =>
+							saveSetting({ n_ctx: recommendedCtx, ram_ceiling_gb: recommendedCeiling })
+						}
+						disabled={busy}
+						className="text-[10px] bg-cyan-950 border border-cyan-500/40 hover:bg-cyan-900 disabled:opacity-40 text-cyan-200 px-2 py-0.5 rounded font-medium transition-colors shrink-0">
 						Apply Optimal
 					</button>
 				</div>
 			</div>
 
-			{/* Target RAM Ceiling Selector */}
+			{/* Model lifecycle */}
+			{modelState && modelState.status !== "idle" && (
+				<div
+					className={`rounded-xl border p-3 text-xs font-mono flex items-start gap-2 ${
+						modelState.status === "error"
+							? "border-red-500/40 bg-red-950/30 text-red-300"
+							: modelState.status === "loading"
+								? "border-amber-500/40 bg-amber-950/30 text-amber-200"
+								: "border-emerald-500/30 bg-emerald-950/20 text-emerald-300"
+					}`}>
+					{modelState.status === "loading" ? (
+						<Loader2 className="h-3.5 w-3.5 mt-px shrink-0 animate-spin" />
+					) : modelState.status === "error" ? (
+						<AlertTriangle className="h-3.5 w-3.5 mt-px shrink-0" />
+					) : (
+						<CheckCircle2 className="h-3.5 w-3.5 mt-px shrink-0" />
+					)}
+					<span className="leading-snug break-words">{modelState.message}</span>
+				</div>
+			)}
+
+			{/* RAM ceiling */}
 			<div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-3">
 				<div className="flex items-center justify-between">
 					<label className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
 						<SlidersHorizontal className="h-4 w-4 text-emerald-400" />
 						RAM Ceiling Target
 					</label>
-					<Badge variant="outline" className="bg-emerald-950 text-emerald-400 border-emerald-500/30 text-[10px] font-mono">
-						{ramCeilingGb.toFixed(1)} GB {ramCeilingGb === recommendedCeiling ? "★ Rec" : ""}
+					<Badge
+						variant="outline"
+						className="bg-emerald-950 text-emerald-400 border-emerald-500/30 text-[10px] font-mono">
+						{ramCeilingGb.toFixed(1)} GB
 					</Badge>
 				</div>
 
 				<Select
 					value={String(ramCeilingGb)}
-					onValueChange={(v) => {
-						const val = Number(v);
-						setRamCeilingGb(val);
-						handleConfigUpdate(nCtx, val);
-					}}
-					disabled={ctxBusy}>
+					onValueChange={(v) => saveSetting({ ram_ceiling_gb: Number(v) })}
+					disabled={busy}>
 					<SelectTrigger
 						size="sm"
-						className="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 h-9 px-2.5 focus:border-cyan-500/60">
-						<SelectValue placeholder="Select RAM Ceiling Target">
-							{`${ramCeilingGb.toFixed(1)} GB Ceiling Target ${ramCeilingGb === recommendedCeiling ? "(Recommended)" : ""}`}
-						</SelectValue>
+						className="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 h-9 px-2.5">
+						<SelectValue />
 					</SelectTrigger>
 					<SelectContent className="bg-slate-900 border border-cyan-500/30 text-slate-100 rounded-lg shadow-2xl">
 						{CEILING_OPTIONS.map((opt) => (
-							<SelectItem key={opt.value} value={String(opt.value)} className="text-xs text-slate-200 hover:bg-cyan-500/20">
-								{opt.label} {opt.value === recommendedCeiling ? "★ Recommended" : ""}
+							<SelectItem key={opt.value} value={String(opt.value)} className="text-xs">
+								{opt.label} {opt.value === recommendedCeiling ? "★" : ""}
 							</SelectItem>
 						))}
 					</SelectContent>
 				</Select>
+				<p className="text-[10px] text-slate-500 leading-snug">
+					Planning target for the KV-cache calculator below. It is not enforced by
+					the GGUF backend.
+				</p>
 			</div>
 
-			{/* Context Window Selector & Memory Calculator */}
+			{/* Context window */}
 			<div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-3">
 				<div className="flex items-center justify-between">
 					<label className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
 						<Gauge className="h-4 w-4 text-amber-400" />
 						Context Window
 					</label>
-					<Badge variant="outline" className="bg-slate-950 text-slate-400 border-slate-700 text-[10px] font-mono">
-						max {maxCtx.toLocaleString()}
+					<Badge
+						variant="outline"
+						className="bg-slate-950 text-slate-400 border-slate-700 text-[10px] font-mono">
+						engine max {safeMaxCtx.toLocaleString()}
 					</Badge>
 				</div>
 
 				<Select
 					value={String(nCtx)}
-					onValueChange={(v) => {
-						const val = Number(v);
-						setNCtx(val);
-						handleConfigUpdate(val, ramCeilingGb);
-					}}
-					disabled={ctxBusy}>
+					onValueChange={(v) => saveSetting({ n_ctx: Number(v) })}
+					disabled={busy}>
 					<SelectTrigger
 						size="sm"
-						className="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 h-9 px-2.5 focus:border-cyan-500/60">
-						<SelectValue placeholder="Choose context window">
-							{(() => {
-								const opt = CONTEXT_OPTIONS.find((o) => o.value === nCtx);
-								const m = computeMemory(nCtx, ramCeilingGb, totalHostRamGb);
-								return `${opt ? opt.label : `${nCtx.toLocaleString()} tokens`} ${nCtx === recommendedCtx ? "★" : ""} — ${formatBytes(m.totalBytes)} Peak RSS`;
-							})()}
-						</SelectValue>
+						className="w-full bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 h-9 px-2.5">
+						<SelectValue />
 					</SelectTrigger>
 					<SelectContent className="bg-slate-900 border border-cyan-500/30 text-slate-100 rounded-lg shadow-2xl max-h-[260px]">
-						{CONTEXT_OPTIONS.map((opt) => {
-							const m = computeMemory(opt.value, ramCeilingGb, totalHostRamGb);
-							const fits = m.totalBytes <= m.ceilingBytes;
-							const isRec = opt.value === recommendedCtx;
+						{contextOptions.map((opt) => {
+							const m = projectMemory(opt.value, ramCeilingGb, measuredRssMb, arch);
 							return (
-								<SelectItem
-									key={opt.value}
-									value={String(opt.value)}
-									className="text-xs text-slate-200 hover:bg-cyan-500/20">
+								<SelectItem key={opt.value} value={String(opt.value)} className="text-xs">
 									<span className="flex flex-col gap-0.5 leading-tight">
 										<span className="font-medium">
-											{opt.label}{" "}
-											{isRec && <span className="text-[10px] text-amber-400 font-semibold">★ Recommended Optimal</span>}
-											{!fits && (
-												<span className="ml-1 text-[10px] font-mono text-red-400">
-													&gt; {ramCeilingGb} GB
-												</span>
-											)}
+											{opt.label} {opt.value === recommendedCtx ? "★" : ""}
 										</span>
 										<span className="text-[10px] font-mono text-slate-400">
-											{formatBytes(m.totalBytes)} Peak RSS · {formatBytes(m.kvBytes)} KV
+											{formatBytes(m.kvBytes)} KV cache
 										</span>
 									</span>
 								</SelectItem>
@@ -372,40 +402,28 @@ export function Sidebar({
 
 				<div className="flex items-center justify-between text-[11px] font-mono">
 					<span className="text-slate-300 font-semibold">
-						{ctxBusy ? "Rebuilding KV cache…" : `${nCtx.toLocaleString()} tokens`}
+						{busy ? "Applying…" : `${nCtx.toLocaleString()} tokens`}
 					</span>
-					<span className={mem.fitsCeiling ? "text-emerald-400" : "text-red-400"}>
-						{mem.fitsCeiling ? `fits ${ramCeilingGb.toFixed(1)} GB ceiling` : `exceeds ${ramCeilingGb.toFixed(1)} GB ceiling`}
+					<span className={mem.fitsCeiling ? "text-emerald-400" : "text-amber-400"}>
+						{formatBytes(mem.kvBytes)} KV
 					</span>
 				</div>
 
-				{/* Breakdown list */}
-				<ul className="space-y-1 text-[10px] font-mono pt-2 border-t border-slate-800">
-					{breakdown.map((seg) => (
-						<li key={seg.label} className="flex items-center justify-between gap-2">
-							<span className="flex items-center gap-1.5 text-slate-300 min-w-0">
-								<span className={`h-1.5 w-1.5 rounded-full ${seg.color} shrink-0`} />
-								<span className="truncate">{seg.label}</span>
-							</span>
-							<span className="text-slate-100 font-semibold">{formatBytes(seg.value)}</span>
-						</li>
-					))}
-					<li className="flex items-center justify-between text-slate-400 pt-1 border-t border-slate-800/60">
-						<span>Headroom vs Ceiling</span>
-						<span className={mem.headroomBytes >= 0 ? "text-emerald-300" : "text-red-300"}>
-							{formatBytes(Math.abs(mem.headroomBytes))} {mem.headroomBytes >= 0 ? "free" : "over"}
-						</span>
-					</li>
-				</ul>
+				<p className="text-[10px] text-slate-500 leading-snug">
+					KV estimate uses the active model&apos;s real geometry: {arch.n_layers} layers,{" "}
+					{arch.n_layers - arch.kv_shared_layers} unique KV, {arch.n_kv_heads} KV heads
+					&times; {arch.head_dim}.
+				</p>
 
-				{ctxMsg && (
-					<p className={`text-[10px] leading-snug ${ctxMsg.startsWith("Failed") ? "text-red-400" : "text-emerald-400"}`}>
-						{ctxMsg}
+				{statusMsg && (
+					<p
+						className={`text-[10px] leading-snug ${statusIsError ? "text-red-400" : "text-emerald-400"}`}>
+						{statusMsg}
 					</p>
 				)}
 			</div>
 
-			{/* Model Directory Target */}
+			{/* Model directory + download */}
 			<div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-3">
 				<label className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
 					<HardDrive className="h-4 w-4 text-indigo-400" />
@@ -414,23 +432,65 @@ export function Sidebar({
 
 				<Input
 					value={modelDir}
-					onChange={(e) => setModelDir(e.target.value)}
+					onChange={(e) => {
+						setModelDir(e.target.value);
+						setModelDirTouched(true);
+					}}
 					placeholder="./models/gemma-4-E4B-it"
-					className="bg-slate-950 border-slate-700 text-slate-200 font-mono text-xs focus:border-cyan-500"
+					className="bg-slate-950 border-slate-700 text-slate-200 font-mono text-[11px] focus:border-cyan-500"
 				/>
+
+				{modelDirTouched && (
+					<Button
+						onClick={applyModelDir}
+						disabled={busy}
+						size="sm"
+						className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs h-8">
+						Apply Directory
+					</Button>
+				)}
+
+				{/* Detected model locations from the server-side scan */}
+				{progress?.scanned_models && progress.scanned_models.length > 0 && (
+					<div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+						{progress.scanned_models
+							.filter((m) => m.available || m.is_active)
+							.map((m) => (
+								<button
+									key={m.path}
+									onClick={() => {
+										setModelDir(m.path);
+										setModelDirTouched(true);
+									}}
+									className={`w-full text-left px-2 py-1.5 rounded-md border text-[10px] font-mono transition-colors ${
+										m.is_active
+											? "border-cyan-500/50 bg-cyan-950/40 text-cyan-200"
+											: "border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700"
+									}`}>
+									<div className="truncate">{m.path}</div>
+									<div className="text-[9px] text-slate-500">
+										{m.has_gguf
+											? `${m.gguf_name} · ${m.size_gb} GB`
+											: "no .gguf present"}
+										{m.is_active ? " · active" : ""}
+									</div>
+								</button>
+							))}
+					</div>
+				)}
 
 				<div className="flex gap-2">
 					<Button
-						onClick={async () => {
-							setIsDownloading(true);
-							await downloadModel("google/gemma-4-E4B-it", modelDir);
-							setIsDownloading(false);
-						}}
-						disabled={isDownloading || progress?.status === "downloading"}
+						onClick={startDownload}
+						disabled={downloadActive || busy}
 						size="sm"
-						className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-semibold text-xs h-8">
-						<Download className="h-3.5 w-3.5 mr-1" />
-						{isDownloading || progress?.status === "downloading" ? "Downloading..." : "HF Download"}
+						className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-semibold text-xs h-8 disabled:opacity-60">
+						{downloadActive ? (
+							<Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+						) : (
+							<Download className="h-3.5 w-3.5 mr-1" />
+						)}
+						{downloadActive ? "Downloading…" : "HF Download"}
 					</Button>
 
 					<Button
@@ -441,9 +501,65 @@ export function Sidebar({
 						<RefreshCw className="h-3.5 w-3.5" />
 					</Button>
 				</div>
+
+				{/* Download progress meter — real bytes against real Content-Length */}
+				{download && download.status !== "idle" && (
+					<div className="space-y-1.5 pt-1">
+						<div className="flex items-center justify-between text-[10px] font-mono">
+							<span
+								className={
+									download.status === "error"
+										? "text-red-400"
+										: download.status === "completed"
+											? "text-emerald-400"
+											: "text-cyan-300"
+								}>
+								{download.status === "error"
+									? "Failed"
+									: download.status === "completed"
+										? "Complete"
+										: `${download.percent}%`}
+							</span>
+							{download.speed_mbps > 0 && (
+								<span className="text-slate-400">
+									{download.speed_mbps.toFixed(1)} MB/s
+								</span>
+							)}
+						</div>
+
+						<div
+							className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800"
+							role="progressbar"
+							aria-valuenow={download.percent}
+							aria-valuemin={0}
+							aria-valuemax={100}
+							aria-label="Model download progress">
+							<div
+								className={`h-full transition-all duration-500 rounded-full ${
+									download.status === "error"
+										? "bg-red-500"
+										: download.status === "completed"
+											? "bg-emerald-400"
+											: "bg-gradient-to-r from-cyan-500 to-emerald-400"
+								}`}
+								style={{ width: `${Math.max(2, download.percent)}%` }}
+							/>
+						</div>
+
+						<p className="text-[10px] font-mono text-slate-400 leading-snug break-words">
+							{download.message}
+						</p>
+
+						{download.total_mb > 0 && (
+							<p className="text-[10px] font-mono text-slate-500">
+								{download.downloaded_mb.toFixed(0)} / {download.total_mb.toFixed(0)} MB
+							</p>
+						)}
+					</div>
+				)}
 			</div>
 
-			{/* Persona Presets */}
+			{/* Persona presets — sourced from presets/*.json via the server */}
 			<div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-3">
 				<label className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
 					<Sliders className="h-4 w-4 text-purple-400" />
@@ -451,28 +567,30 @@ export function Sidebar({
 				</label>
 
 				<div className="grid grid-cols-2 gap-1.5">
-					{[
-						{ id: "default", label: "Default", temp: "0.2" },
-						{ id: "coder", label: "Coder", temp: "0.2" },
-						{ id: "concise", label: "Concise", temp: "0.1" },
-						{ id: "reasoner", label: "Reasoner", temp: "0.4" },
-					].map((p) => (
+					{presets.map((p) => (
 						<button
 							key={p.id}
 							onClick={() => setPreset(p.id)}
+							title={p.system_instruction || "No system instruction"}
 							className={`p-2 rounded-lg border text-left text-xs transition-all ${
 								currentPreset === p.id
 									? "bg-purple-950/60 border-purple-500/50 text-purple-200 font-semibold"
 									: "bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200"
 							}`}>
-							<div className="font-medium">{p.label}</div>
-							<div className="text-[10px] text-slate-500 font-mono">temp: {p.temp}</div>
+							<div className="font-medium truncate">{p.name}</div>
+							<div className="text-[10px] text-slate-500 font-mono">
+								temp {p.temperature} · top_p {p.top_p}
+							</div>
 						</button>
 					))}
+					{presets.length === 0 && (
+						<p className="col-span-2 text-[10px] text-slate-500 font-mono">
+							Loading presets from server…
+						</p>
+					)}
 				</div>
 			</div>
 
-			{/* Stop Server */}
 			<div className="pt-2">
 				<Button
 					onClick={handleStop}

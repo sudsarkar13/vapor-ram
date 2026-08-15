@@ -56,9 +56,10 @@ export default function VaporDashboardPage() {
 				setActiveTab={setActiveTab}
 				onClearChat={handleClearChat}
 				isOnline={isOnline}
-				activeModel={health?.active_model || "google/gemma-4-E4B-it"}
-				slots={health?.slots || progress?.slots}
-			/>
+					activeModel={health?.model ?? "google/gemma-4-E4B-it"}
+					slots={health?.slots ?? progress?.slots}
+					version={health?.version}
+				/>
 
 			{/* Main Workspace Body */}
 			<div className="flex flex-col md:flex-row flex-1 overflow-hidden">
@@ -77,6 +78,8 @@ export default function VaporDashboardPage() {
 							messages={messages}
 							setMessages={setMessages}
 							preset={currentPreset}
+							modelState={health?.model_state ?? progress?.model_state}
+							modelAvailable={health?.model_available ?? true}
 						/>
 					)}
 
