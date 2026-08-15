@@ -156,6 +156,10 @@ def main():
     web_parser.add_argument("--no-auth", action="store_true",
                             help="Skip API key authentication even when sharing")
 
+    stop_parser = subparsers.add_parser(
+        "stop", help="Stop a running VaporRAM server from another terminal")
+    stop_parser.add_argument("--port", type=int, default=8000, help="Port the server listens on (default: 8000)")
+
     share_parser = subparsers.add_parser(
         "share", help="Show the URL, API key and client snippets for other devices")
     share_parser.add_argument("--port", type=int, default=8000, help="Port the server listens on (default: 8000)")
@@ -351,6 +355,40 @@ def main():
         threading.Thread(target=open_browser, daemon=True).start()
         openai_server.serve(host=host, port=args.port, api_key=args.api_key,
                             require_auth=False if args.no_auth else None)
+
+    elif args.command == "stop":
+        # Uses the same endpoint as the dashboard's Stop button, so it works
+        # whenever the Web UI does -- including when the terminal cannot
+        # deliver CTRL+C to the server process.
+        import urllib.request, urllib.error
+        from . import openai_server
+        base = f"http://127.0.0.1:{args.port}"
+        key = openai_server.load_persisted_api_key()
+
+        def attempt(headers):
+            req = urllib.request.Request(f"{base}/v1/system/stop", data=b"{}",
+                                         headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status
+
+        try:
+            try:
+                attempt({"Content-Type": "application/json"})
+            except urllib.error.HTTPError as e:
+                if e.code != 401 or not key:
+                    raise
+                attempt({"Content-Type": "application/json", "X-API-Key": key})
+            print(f"\033[32m[VaporRAM]\033[0m Server on port {args.port} stopped.")
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                print(f"\033[1;31m[VaporRAM]\033[0m Server on port {args.port} rejected the stored API key.")
+                print("  Pass the key the server was started with, or use: kill <pid>")
+            else:
+                print(f"\033[1;31m[VaporRAM]\033[0m Server returned HTTP {e.code}.")
+            sys.exit(1)
+        except Exception:
+            print(f"\033[1;33m[VaporRAM]\033[0m No server responding on port {args.port}.")
+            sys.exit(1)
 
     elif args.command == "share":
         from . import openai_server

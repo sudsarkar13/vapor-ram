@@ -210,7 +210,23 @@ You can customize execution using presets or flags:
 | `./vapor bench` | Run AVX2 SIMD core throughput benchmark |
 | `./vapor presets` | List available persona presets (`coder`, `reasoner`, `concise`) |
 | `./vapor share` | Show the URL, API key and client snippets for other devices |
+| `./vapor stop` | Stop a running server from another terminal |
 | `./vapor lan` | Show this machine's LAN address |
+
+### Stopping the Server
+
+CTRL+C stops the server, including while the engine is mid-generation.
+CTRL+\ works too. If neither reaches the process — some terminals do not
+deliver the signal to the foreground process — stop it from anywhere with:
+
+```bash
+./vapor stop                 # same path as the dashboard's Stop button
+```
+
+You can also type `q` and press Enter in the server's own terminal, or use the
+PID printed in the startup banner. Run with `VAPOR_DEBUG_SIGNALS=1` to see
+which shutdown path is armed and whether the terminal can generate signals at
+all.
 
 ---
 

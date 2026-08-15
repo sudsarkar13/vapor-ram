@@ -1440,8 +1440,15 @@ class VaporHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
 
+# SIGQUIT (CTRL+\) and SIGHUP are included so there is more than one keystroke
+# that can stop the server if SIGINT is being intercepted somewhere.
 SHUTDOWN_SIGNALS = tuple(
-    sig for sig in (getattr(signal, "SIGINT", None), getattr(signal, "SIGTERM", None))
+    sig for sig in (
+        getattr(signal, "SIGINT", None),
+        getattr(signal, "SIGTERM", None),
+        getattr(signal, "SIGQUIT", None),
+        getattr(signal, "SIGHUP", None),
+    )
     if sig is not None
 )
 
@@ -1473,6 +1480,105 @@ def block_shutdown_signals():
         return True
     except (OSError, ValueError):
         return False
+
+
+def terminal_report():
+    """Why CTRL+C might never reach this process.
+
+    sigwait() cannot return for a signal the process never receives. Two
+    situations produce that, and neither is visible from inside the server
+    without asking the terminal directly:
+
+      * the process is not in the terminal's foreground process group, so the
+        tty driver sends SIGINT to some other process entirely;
+      * the tty has ISIG cleared (something left it in raw mode), so ^C is
+        delivered as the byte 0x03 instead of being turned into a signal.
+    """
+    report = {"stdin_tty": False, "fg_pgrp": None, "our_pgrp": None,
+              "in_foreground": None, "isig": None}
+    try:
+        report["our_pgrp"] = os.getpgrp()
+    except Exception:
+        pass
+
+    fd = None
+    for candidate in (0, 1, 2):
+        try:
+            if os.isatty(candidate):
+                fd = candidate
+                break
+        except Exception:
+            continue
+    if fd is None:
+        return report
+
+    report["stdin_tty"] = True
+    try:
+        report["fg_pgrp"] = os.tcgetpgrp(fd)
+        report["in_foreground"] = report["fg_pgrp"] == report["our_pgrp"]
+    except Exception:
+        pass
+    try:
+        import termios
+        attrs = termios.tcgetattr(fd)
+        report["isig"] = bool(attrs[3] & termios.ISIG)
+    except Exception:
+        pass
+    return report
+
+
+def restore_terminal_signals():
+    """Re-enable ISIG if something left the terminal unable to make signals."""
+    try:
+        import termios
+    except Exception:
+        return False
+    for fd in (0, 1, 2):
+        try:
+            if not os.isatty(fd):
+                continue
+            attrs = termios.tcgetattr(fd)
+            if attrs[3] & termios.ISIG:
+                continue
+            attrs[3] |= termios.ISIG
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
+            sys.stderr.write(
+                "\033[33m[VaporRAM] Terminal had CTRL+C disabled (ISIG off); "
+                "re-enabled it.\033[0m\n")
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _console_watchdog():
+    """Stop channel that does not depend on signals at all.
+
+    When the tty turns ^C into SIGINT (the normal case) the keystroke never
+    reaches stdin and this thread just blocks forever, costing nothing. When
+    it does not -- raw mode, or a terminal that swallows the signal -- the
+    0x03 byte lands here instead and stops the server. Typing `q` or `stop`
+    and pressing Enter works either way.
+    """
+    try:
+        if not sys.stdin or not sys.stdin.isatty():
+            return
+    except Exception:
+        return
+    while True:
+        try:
+            data = os.read(sys.stdin.fileno(), 1024)
+        except Exception:
+            return
+        if not data:
+            return  # EOF: leave the server running, do not treat as a stop
+        if b"\x03" in data or b"\x04" in data:
+            shutdown_server("Server stopped via terminal (CTRL+C).")
+            return
+        word = data.strip().lower()
+        if word in (b"q", b"quit", b"stop", b"exit"):
+            shutdown_server("Server stopped from the console.")
+            return
 
 
 def _debug_signals(message):
@@ -1553,6 +1659,21 @@ def _serve_until_signal(server):
     signal.pthread_sigmask(signal.SIG_BLOCK, SHUTDOWN_SIGNALS)
     _debug_signals(f"armed sigwait on pid {os.getpid()} for "
                    f"{[signal.Signals(x).name for x in SHUTDOWN_SIGNALS]}")
+
+    # A terminal that cannot generate SIGINT will never satisfy sigwait, so
+    # repair it where possible and report what was found.
+    restore_terminal_signals()
+    report = terminal_report()
+    _debug_signals(f"terminal: {report}")
+    if report["stdin_tty"] and report["in_foreground"] is False:
+        sys.stderr.write(
+            f"\033[33m[VaporRAM] This process (pgrp {report['our_pgrp']}) is not the "
+            f"terminal's foreground group (pgrp {report['fg_pgrp']}), so CTRL+C is being "
+            f"delivered elsewhere. Use `vapor stop`, or kill {os.getpid()}.\033[0m\n")
+
+    # Independent of signals entirely: catches ^C arriving as a raw byte.
+    threading.Thread(target=_console_watchdog, name="vapor-console",
+                     daemon=True).start()
 
     worker = threading.Thread(
         target=server.serve_forever,

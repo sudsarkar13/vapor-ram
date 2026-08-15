@@ -11,7 +11,7 @@ _vapor_completion() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    opts="doctor plan bench profile inspect config lan share presets init-config download run chat serve web completion release"
+    opts="doctor plan bench profile inspect config lan share stop presets init-config download run chat serve web completion release"
 
     if [ $COMP_CWORD -eq 1 ]; then
         COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
@@ -35,6 +35,7 @@ _vapor() {
         'config:Run interactive terminal configuration wizard'
         'lan:Display LAN IP and network sharing instructions'
         'share:Show the URL, API key and client snippets for other devices'
+        'stop:Stop a running VaporRAM server'
         'presets:List available persona presets'
         'init-config:Create default vapor.json configuration file'
         'download:Download google/gemma-4-E4B-it weights'
