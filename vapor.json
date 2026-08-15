@@ -1,6 +1,6 @@
 {
   "model_id": "google/gemma-4-E4B-it",
   "model_dir": "./models/gemma-4-E4B-it",
-  "ram_ceiling_gb": 1.5,
-  "n_ctx": 8192
+  "ram_ceiling_gb": 4.0,
+  "n_ctx": 16384
 }
