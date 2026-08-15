@@ -213,7 +213,7 @@ jobs:
         run: make -C c
 
       - name: Install build tooling
-        run: python -m pip install --upgrade pip build twine
+        run: python -m pip install --upgrade pip build twine packaging
 
       - name: Build sdist and wheel
         run: python -m build
@@ -222,19 +222,23 @@ jobs:
         run: twine check dist/*
 
       - name: Assert artifact version matches the tag
+        env:
+          TAG_VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          VERSION="${{ needs.validate.outputs.version }}"
-          # PEP 440 normalises 1.0.7-alpha.3 to 1.0.7a3 in filenames.
-          NORMALISED="$(python -c "
-          from packaging.version import Version
-          print(Version('$VERSION'))
-          " 2>/dev/null || echo "$VERSION")"
-          echo "Looking for $NORMALISED in dist/"
-          ls dist/
-          if ! ls dist/ | grep -qF "$NORMALISED"; then
-            echo "::error::Built artifacts do not carry version $NORMALISED"
-            exit 1
-          fi
+          # PEP 440 normalises 1.0.7-alpha.4 to 1.0.7a4 in artifact filenames, so
+          # the tag string cannot be matched literally. Normalisation must succeed:
+          # falling back to the raw tag would look for "1.0.7-alpha.4" in a file
+          # named "...1.0.7a4..." and fail with a misleading message.
+          NORMALISED="$(python -c 'import os; from packaging.version import Version; print(Version(os.environ["TAG_VERSION"]))')"
+          echo "Tag $TAG_VERSION normalises to $NORMALISED"
+          ls -1 dist/
+          for f in dist/*; do
+            case "$(basename "$f")" in
+              *"$NORMALISED"*) ;;
+              *) echo "::error::$(basename "$f") does not carry version $NORMALISED"; exit 1 ;;
+            esac
+          done
+          echo "All artifacts carry $NORMALISED."
 
       - uses: actions/upload-artifact@v4
         with:
