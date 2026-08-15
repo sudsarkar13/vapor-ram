@@ -4,6 +4,39 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### 🐛 Fixed Bugs & Issues
+- **Dashboard/API contract mismatch**: `/health` returns `model` and `ram_ceiling_gb`, but the client declared `active_model` and `ram_ceiling`. The Doctor tab rendered literal `undefined`; the header masked the same bug behind a hardcoded fallback.
+- **Download progress was unreachable**: the client read `status` at the top level of `/v1/system/progress`, where the server always reports `"ok"`; real download state lives under `download_progress`. The comparison could never be true, and no component rendered `percent` at all.
+- **Context window reported dishonestly**: `n_ctx` up to 131072 was accepted and persisted while generation silently clamped to 16384. Oversized requests are now refused with the real limit, so the displayed value always matches the allocated KV cache.
+- **Model directory clobbered by unrelated saves**: every config write re-sent `model_dir`, so changing the context window overwrote the active model path (and converted it to a CWD-relative string). `model_dir` now only changes when explicitly set.
+- **Saved `model_dir` never restored**: the value was written to `vapor.json` on save but never read back at startup, silently reverting to the default on every restart.
+- **`--api-key` had no effect**: `serve()` never assigned the key to the request handler, leaving the server unauthenticated.
+- **Streaming was a replay animation**: the full response was generated before SSE headers were sent, then re-chunked with a fixed delay. Tokens are now emitted as llama.cpp decodes them.
+- **Single-threaded server**: any generation blocked every other request, freezing the dashboard's polling for its full duration.
+- **Chat history discarded**: only `messages[-1]` reached the model, making multi-turn conversation impossible.
+- **Presets were inert**: the persona name was sent as a `Preset: x` system message and then dropped server-side; `presets/*.json` were never read by the server, and `temperature`/`top_p` were never applied.
+- **Release tarballs bundled `node_modules`**: `package_release.py` copied all of `web/` (~700 MB). Tarballs are now ~1.2 MB.
+- **Committed dashboard was incomplete**: an over-broad `dist/` ignore rule excluded `web/dist/_next/**`, so a clean checkout shipped an `index.html` referencing JavaScript chunks that were never committed.
+- **sdist shipped no assets**: added `MANIFEST.in`; source distributions now include the dashboard, presets and C sources.
+
+### 🚀 Highlights & Features
+- **Real telemetry**: host RAM is re-read per request (was captured once at import and frozen), and process RSS is measured from `/proc/self/statm`. Fabricated constants (`peak_rss_mb: 142.32`, `204795.96` GFLOPS, fixed per-kernel timings) are gone; unmeasured values are reported as unavailable rather than invented.
+- **Model architecture from `config.json`**: layer/head geometry is read from the active model instead of three conflicting hardcoded sets. Reports 42 layers / 2 KV heads / 18 shared for `gemma-4-E4B-it`.
+- **Model lifecycle state**: `model_state` distinguishes `idle`/`loading`/`ready`/`error`, so a multi-second weight load is visible instead of looking like a hang.
+- **Download progress meter**: byte-accurate percentage against real `Content-Length`, with transfer rate, ETA and resume support; `repo`/`dest` from the dashboard are now honoured.
+- **New endpoints**: `/v1/presets` and `/v1/doctor` (runs the real inspector rather than hardcoded verdicts).
+- **Shared telemetry contract**: every status endpoint embeds one identical block, replacing four divergent payload shapes.
+- **Live Brain and Profiling views**: both read measured runtime data; unavailable metrics are labelled as such.
+- **Model directory picker**: server-side scan results with GGUF name and size are selectable in the dashboard.
+- **Generation metrics**: tokens/second and time-to-first-token measured and surfaced.
+- **CLI parity**: `vapor chat` keeps conversation history, streams tokens, applies presets, and `/stats` reports measured values.
+- **CI/CD overhaul**: matrix CI across Linux/macOS and Python 3.9/3.12; version-consistency gate across all eight manifests (`tools/check_version.py`); stale-`web/dist` detection; sdist completeness gate; tag-driven release pipeline with automatic Stable/Beta/Alpha/RC channel handling, native per-platform tarballs, OIDC PyPI publishing with PEP 740 attestations, and Stable-only docs sync.
+- **Test suite**: expanded from 4 smoke assertions to 45 contract checks covering telemetry shape, context honesty, model-directory isolation, preset resolution, concurrency, and the weightless failure mode.
+
+---
+
 ## [v1.0.7-alpha.3] - 2026-08-04
 
 ### 🚀 Highlights & Features
