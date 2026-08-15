@@ -330,6 +330,42 @@ def test_generation_without_weights(port):
 TEST_KEY = "vr_test_key_do_not_persist"
 
 
+def test_performance_settings():
+    """Thread selection and preloading."""
+    print("\n\033[1;36m[10] Engine Performance Settings\033[0m")
+    from vapor_ram import openai_server as s
+
+    physical = s.physical_core_count()
+    logical = os.cpu_count() or 1
+    check("physical core count is detected", physical >= 1, str(physical))
+    check("physical cores do not exceed logical", physical <= logical,
+          f"{physical} > {logical}")
+    check("threads default to physical cores, not SMT siblings",
+          s.optimal_thread_count() == physical, f"{s.optimal_thread_count()} != {physical}")
+
+    os.environ["VAPOR_N_THREADS"] = "3"
+    try:
+        check("VAPOR_N_THREADS overrides detection", s.optimal_thread_count() == 3,
+              str(s.optimal_thread_count()))
+    finally:
+        del os.environ["VAPOR_N_THREADS"]
+    os.environ["VAPOR_N_THREADS"] = "not-a-number"
+    try:
+        check("a bad VAPOR_N_THREADS falls back instead of crashing",
+              s.optimal_thread_count() == physical)
+    finally:
+        del os.environ["VAPOR_N_THREADS"]
+
+    check("preload is skipped when there are no weights",
+          s.preload_model_async.__doc__ is not None)
+
+    # Presets must not inject fake control tokens. <|think|> is not a Gemma
+    # token; it tokenises as literal text and only wastes context.
+    bad = [p for p, v in s.PRESETS.items()
+           if "<|think|>" in (v.get("system_instruction") or "")]
+    check("no preset injects a fake <|think|> token", not bad, str(bad))
+
+
 def test_network_sharing():
     """Authenticated sharing. Runs last: enabling auth flips module-level state
     that every other server in this process shares."""
@@ -473,7 +509,9 @@ def main():
     port = free_port()
     threading.Thread(
         target=openai_server.serve,
-        kwargs={"host": "127.0.0.1", "port": port},
+        # preload=False: the suite must not pull 4.6 GB of weights into RAM,
+        # and it deliberately exercises the weightless failure path.
+        kwargs={"host": "127.0.0.1", "port": port, "preload": False},
         daemon=True).start()
 
     for _ in range(50):
@@ -495,6 +533,7 @@ def main():
     test_presets_and_download(port)
     test_concurrency_and_assets(port)
     test_generation_without_weights(port)
+    test_performance_settings()
     test_network_sharing()
 
     print("\n" + "=" * 60)

@@ -14,8 +14,7 @@ DEFAULT_CONFIG = {
     "host": "0.0.0.0",
     "port": 8000,
     "api_key": None,
-    "quant_type": "int8_kv_int4_weights",
-    "enable_thinking": True
+    "quant_type": "int8_kv_int4_weights"
 }
 
 def load_config(config_path="vapor.json"):

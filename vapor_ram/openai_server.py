@@ -231,6 +231,54 @@ def read_model_architecture(model_dir):
     return True
 
 
+def physical_core_count():
+    """Physical cores, not SMT siblings.
+
+    llama.cpp's matmul kernels saturate each core's vector units, so running
+    one thread per hyperthread makes two threads fight over the same FPU and
+    costs throughput instead of adding any. os.cpu_count() reports SMT
+    siblings, which is why this is counted from the topology instead.
+    """
+    try:
+        cores = {}
+        with open("/proc/cpuinfo") as f:
+            phys = core = None
+            for line in f:
+                if line.startswith("physical id"):
+                    phys = line.split(":")[1].strip()
+                elif line.startswith("core id"):
+                    core = line.split(":")[1].strip()
+                elif not line.strip() and phys is not None and core is not None:
+                    cores[(phys, core)] = True
+                    phys = core = None
+        if cores:
+            return len(cores)
+    except Exception:
+        pass
+    try:
+        import psutil
+        count = psutil.cpu_count(logical=False)
+        if count:
+            return int(count)
+    except Exception:
+        pass
+    logical = os.cpu_count() or 4
+    return max(1, logical // 2)
+
+
+def optimal_thread_count():
+    """Threads for llama.cpp. VAPOR_N_THREADS overrides the detected value."""
+    override = os.environ.get("VAPOR_N_THREADS", "").strip()
+    if override:
+        try:
+            value = int(override)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return max(1, physical_core_count())
+
+
 def clamp_context(requested):
     """Single source of truth for context sizing. Returns (effective, was_clamped)."""
     try:
@@ -705,8 +753,10 @@ def get_llama(gguf_file):
         sys.stderr.write(f"\033[36m[GGUF Engine] Loading {gguf_file} (n_ctx={target_ctx})\033[0m\n")
 
     started = time.perf_counter()
+    threads = optimal_thread_count()
     try:
-        llm = Llama(model_path=gguf_file, n_ctx=target_ctx, n_threads=os.cpu_count() or 4,
+        llm = Llama(model_path=gguf_file, n_ctx=target_ctx,
+                    n_threads=threads, n_threads_batch=threads,
                     verbose=False)
         applied_ctx = target_ctx
     except Exception as alloc_err:
@@ -716,7 +766,8 @@ def get_llama(gguf_file):
         set_model_state("loading", f"Retrying {name} at reduced context {fallback}…",
                         path=gguf_file, ctx=fallback)
         try:
-            llm = Llama(model_path=gguf_file, n_ctx=fallback, n_threads=os.cpu_count() or 4,
+            llm = Llama(model_path=gguf_file, n_ctx=fallback,
+                        n_threads=threads, n_threads_batch=threads,
                         verbose=False)
             applied_ctx = fallback
         except Exception as e:
@@ -730,7 +781,8 @@ def get_llama(gguf_file):
     load_ms = round((time.perf_counter() - started) * 1000, 2)
     set_model_state("ready", f"{name} ready (n_ctx={applied_ctx}, loaded in {load_ms / 1000:.1f}s)",
                     path=gguf_file, ctx=applied_ctx)
-    sys.stderr.write(f"\033[32m[GGUF Engine] {name} ready in {load_ms / 1000:.1f}s\033[0m\n")
+    sys.stderr.write(f"\033[32m[GGUF Engine] {name} ready in {load_ms / 1000:.1f}s "
+                     f"({threads} threads)\033[0m\n")
     return llm
 
 
@@ -1714,6 +1766,32 @@ def _install_handler_fallback():
             pass
 
 
+def preload_model_async():
+    """Load the weights at startup instead of on the first message.
+
+    Loading is ~8s of mmap plus KV allocation. Doing it lazily meant the first
+    chat paid that cost on top of its own generation, which reads as the server
+    hanging. This runs on a background thread so the HTTP server and dashboard
+    come up immediately -- model_state already reports "loading", so the UI
+    shows real progress rather than an unexplained wait.
+    """
+    if not find_gguf(current_model_path):
+        return None
+
+    def _load():
+        try:
+            with _generation_lock:
+                get_llama(find_gguf(current_model_path))
+        except Exception as e:
+            # A preload failure must not take the server down; the next request
+            # will surface the real error through the normal path.
+            sys.stderr.write(f"\033[33m[GGUF Engine] Preload failed: {e}\033[0m\n")
+
+    thread = threading.Thread(target=_load, name="vapor-preload", daemon=True)
+    thread.start()
+    return thread
+
+
 def configure_sharing(host, port, api_key=None, require_auth=None):
     """Decide the auth posture for this bind and return the share details.
 
@@ -1737,7 +1815,7 @@ def configure_sharing(host, port, api_key=None, require_auth=None):
     return share_urls()
 
 
-def serve(host="0.0.0.0", port=8000, api_key=None, require_auth=None):
+def serve(host="0.0.0.0", port=8000, api_key=None, require_auth=None, preload=True):
     global server_instance
     share = configure_sharing(host, port, api_key=api_key, require_auth=require_auth)
     server_instance = VaporHTTPServer((host, port), VaporRequestHandler)
@@ -1761,11 +1839,18 @@ def serve(host="0.0.0.0", port=8000, api_key=None, require_auth=None):
         print(block + "\033[1;36m")
     print(f"  \033[90m(Press CTRL+C or use the Web UI Stop button to control the server)\033[0m")
     print(f"  \033[90m PID {os.getpid()} \u2014 if CTRL+C ever fails, run: kill {os.getpid()}\033[0m")
+    if gguf:
+        print(f"  \033[32m\u279c\033[1;36m  Threads         : \033[1;37m{optimal_thread_count()} "
+              f"\033[90m(physical cores; VAPOR_N_THREADS overrides)\033[1;36m")
     print()
     # stdout is block-buffered when it isn't a terminal, and shutdown ends in
     # os._exit(), which skips flushing. Without this the whole banner — API key
     # included — is lost whenever the server is piped to a file or supervisor.
     sys.stdout.flush()
+
+    # Warm the engine before the first message rather than during it.
+    if preload:
+        preload_model_async()
 
     _serve_until_signal(server_instance)
 

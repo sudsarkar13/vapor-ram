@@ -40,7 +40,6 @@ def run_wizard():
     new_cfg["host"] = ask("host", "0.0.0.0", "LAN Host Binding IP")
     new_cfg["port"] = ask("port", 8000, "Server Port Number")
     new_cfg["api_key"] = ask("api_key", "", "API Key Authorization (leave blank for none)") or None
-    new_cfg["enable_thinking"] = ask("enable_thinking", True, "Enable Gemma 4 Reasoning Mode (<|think|>)")
 
     with open(CONFIG_PATH, "w") as f:
         json.dump(new_cfg, f, indent=2)

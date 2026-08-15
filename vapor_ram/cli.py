@@ -143,6 +143,8 @@ def main():
                               help="Issue a fresh API key, revoking the previous one")
     serve_parser.add_argument("--no-auth", action="store_true",
                               help="Serve without an API key (anyone who can reach the port can use the model)")
+    serve_parser.add_argument("--no-preload", action="store_true",
+                              help="Load the weights on the first message instead of at startup")
 
     web_parser = subparsers.add_parser("web", help="Launch server and open Web UI in browser")
     web_parser.add_argument("--port", type=int, default=8000, help="Port number (default: 8000)")
@@ -155,6 +157,8 @@ def main():
     web_parser.add_argument("--api-key", default=None, help="API key to require when sharing")
     web_parser.add_argument("--no-auth", action="store_true",
                             help="Skip API key authentication even when sharing")
+    web_parser.add_argument("--no-preload", action="store_true",
+                            help="Load the weights on the first message instead of at startup")
 
     stop_parser = subparsers.add_parser(
         "stop", help="Stop a running VaporRAM server from another terminal")
@@ -329,7 +333,8 @@ def main():
         if args.new_key:
             openai_server.rotate_api_key()
         openai_server.serve(host=args.host, port=args.port, api_key=args.api_key,
-                            require_auth=False if args.no_auth else None)
+                            require_auth=False if args.no_auth else None,
+                            preload=not args.no_preload)
 
     elif args.command == "web":
         import threading, time
@@ -354,7 +359,8 @@ def main():
             webbrowser.open(local)
         threading.Thread(target=open_browser, daemon=True).start()
         openai_server.serve(host=host, port=args.port, api_key=args.api_key,
-                            require_auth=False if args.no_auth else None)
+                            require_auth=False if args.no_auth else None,
+                            preload=not args.no_preload)
 
     elif args.command == "stop":
         # Uses the same endpoint as the dashboard's Stop button, so it works
