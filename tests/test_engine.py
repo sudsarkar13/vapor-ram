@@ -77,6 +77,23 @@ def test_c_engine():
         check("engine executes", False, f"exit {e.returncode}")
 
 
+def test_launcher_executable():
+    """`./vapor` must be executable, and must run from a checkout."""
+    print("\n[1b/7] Development launcher")
+    launcher = os.path.join(HERE, "vapor")
+    check("vapor launcher exists", os.path.exists(launcher), "missing")
+    if not os.path.exists(launcher):
+        return
+    check("vapor is executable", os.access(launcher, os.X_OK),
+          "lost its +x bit (git mode should be 100755)")
+    try:
+        out = subprocess.check_output([launcher, "--version"],
+                                      stderr=subprocess.STDOUT, timeout=60).decode()
+        check("./vapor --version runs", "VaporRAM" in out, f"got {out!r}")
+    except Exception as e:
+        check("./vapor --version runs", False, str(e))
+
+
 def test_unit_logic():
     print("\n[2/7] Pure logic (no server)")
     from vapor_ram import openai_server as s
@@ -330,6 +347,7 @@ def main():
         return 1
 
     test_c_engine()
+    test_launcher_executable()
     test_unit_logic()
     test_http_contract(port)
     test_context_honesty(port)
