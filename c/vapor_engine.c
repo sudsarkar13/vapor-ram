@@ -71,11 +71,24 @@ int main(int argc, char **argv) {
     fprintf(stderr, "[Target Model] google/gemma-4-E4B-it\n");
     fprintf(stderr, "[RAM Ceiling ] < 1.5 GB\n");
     fprintf(stderr, "[Streaming IO] O_DIRECT SSD Double-Buffer (140 MB/layer)\n");
+    /* Report the ISA and threading actually compiled in, rather than asserting
+       AVX2 + OpenMP on builds where neither flag was accepted (e.g. arm64). */
     int num_threads = 1;
 #ifdef _OPENMP
     num_threads = omp_get_max_threads();
 #endif
-    fprintf(stderr, "[SIMD Engine ] AVX2 + FMA3 + OpenMP (%d threads)\n", num_threads);
+#if defined(__AVX2__)
+    const char *isa = "AVX2 + FMA3";
+#elif defined(__ARM_NEON) || defined(__aarch64__)
+    const char *isa = "ARM NEON";
+#else
+    const char *isa = "scalar";
+#endif
+#ifdef _OPENMP
+    fprintf(stderr, "[SIMD Engine ] %s + OpenMP (%d threads)\n", isa, num_threads);
+#else
+    fprintf(stderr, "[SIMD Engine ] %s (single-threaded, no OpenMP)\n", isa);
+#endif
     fprintf(stderr, "[Input Prompt] \"%s\"\n\n", prompt);
 
     // Initialize Streaming IO
