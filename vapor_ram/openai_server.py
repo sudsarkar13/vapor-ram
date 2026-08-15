@@ -1446,6 +1446,41 @@ SHUTDOWN_SIGNALS = tuple(
 )
 
 
+def signals_blockable():
+    """True when the sigwait() shutdown path is available on this platform."""
+    return bool(
+        SHUTDOWN_SIGNALS
+        and hasattr(signal, "pthread_sigmask")
+        and hasattr(signal, "sigwait")
+    )
+
+
+def block_shutdown_signals():
+    """Block SIGINT/SIGTERM in the calling thread.
+
+    Must run before any other thread is created. A process-directed signal is
+    delivered to an arbitrary thread that does not block it, and threads
+    inherit the mask of their creator -- so if anything is spawned before this
+    (the browser opener in `vapor web`, an OpenMP pool, a llama.cpp worker),
+    that thread can absorb the CTRL+C instead of sigwait() receiving it. The
+    C-level handler then just sets a flag the main thread never gets around to
+    processing, and the signal is lost.
+    """
+    if not signals_blockable():
+        return False
+    try:
+        signal.pthread_sigmask(signal.SIG_BLOCK, SHUTDOWN_SIGNALS)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _debug_signals(message):
+    if os.environ.get("VAPOR_DEBUG_SIGNALS"):
+        sys.stderr.write(f"\033[90m[signals] {message}\033[0m\n")
+        sys.stderr.flush()
+
+
 def shutdown_server(reason="Server stopped"):
     """Stop the HTTP server and exit, without hanging on in-flight work.
 
@@ -1486,32 +1521,38 @@ def shutdown_server(reason="Server stopped"):
 def _serve_until_signal(server):
     """Block until SIGINT/SIGTERM, then shut down.
 
-    Waits with sigwait() on a dedicated thread-blocked signal set rather than
-    relying on a Python-level handler. A handler only runs when the *main
-    thread* reaches the eval loop, which does not happen while llama.cpp is
-    loading weights or decoding tokens -- so CTRL+C was silently ignored for
-    the entire time the engine was actually busy, which is exactly when a user
-    reaches for it.
+    Waits with sigwait() on a thread-blocked signal set rather than relying on
+    a Python-level handler. A handler only runs when the *main thread* reaches
+    the eval loop, which does not happen while llama.cpp is loading weights or
+    decoding tokens -- so CTRL+C was silently ignored for the entire time the
+    engine was actually busy, which is exactly when a user reaches for it.
 
     sigwait() is a blocking syscall that returns as soon as the signal is
     queued, so it is unaffected by interpreter-level starvation.
     """
-    usable = (
-        SHUTDOWN_SIGNALS
-        and hasattr(signal, "pthread_sigmask")
-        and hasattr(signal, "sigwait")
-        and threading.current_thread() is threading.main_thread()
-    )
+    on_main = threading.current_thread() is threading.main_thread()
+    usable = signals_blockable() and on_main
 
     if not usable:
-        # Non-main thread (e.g. the test suite) or a platform without
-        # pthread_sigmask: fall back to serving inline.
-        server.serve_forever(poll_interval=0.5)
+        # Non-main thread (the test suite) or a platform without
+        # pthread_sigmask. Install ordinary handlers so CTRL+C still stops the
+        # process here, rather than leaving shutdown to an implicit
+        # KeyboardInterrupt traceback.
+        _debug_signals(
+            f"sigwait unavailable (main_thread={on_main}, "
+            f"blockable={signals_blockable()}); using handler fallback")
+        _install_handler_fallback()
+        try:
+            server.serve_forever(poll_interval=0.5)
+        except KeyboardInterrupt:
+            shutdown_server("Server stopped via terminal (CTRL+C).")
         return
 
-    # Block the shutdown signals in this thread; worker threads created after
-    # this inherit the mask, so nothing else can consume them first.
+    # Normally already blocked by block_shutdown_signals() before any thread
+    # existed; repeating it is harmless and covers direct serve() callers.
     signal.pthread_sigmask(signal.SIG_BLOCK, SHUTDOWN_SIGNALS)
+    _debug_signals(f"armed sigwait on pid {os.getpid()} for "
+                   f"{[signal.Signals(x).name for x in SHUTDOWN_SIGNALS]}")
 
     worker = threading.Thread(
         target=server.serve_forever,
@@ -1529,9 +1570,27 @@ def _serve_until_signal(server):
     except Exception:
         name = "signal"
 
+    _debug_signals(f"sigwait returned {name}")
     reason = ("Server stopped via terminal (CTRL+C)."
               if name == "SIGINT" else f"Server stopped ({name}).")
     shutdown_server(reason)
+
+
+def _install_handler_fallback():
+    """Conventional signal handlers, for when sigwait() cannot be used."""
+    def _handler(signum, _frame):
+        try:
+            name = signal.Signals(signum).name
+        except ValueError:
+            name = str(signum)
+        shutdown_server("Server stopped via terminal (CTRL+C)."
+                        if name == "SIGINT" else f"Server stopped ({name}).")
+
+    for sig in SHUTDOWN_SIGNALS:
+        try:
+            signal.signal(sig, _handler)
+        except (ValueError, OSError):
+            pass
 
 
 def configure_sharing(host, port, api_key=None, require_auth=None):
@@ -1579,7 +1638,8 @@ def serve(host="0.0.0.0", port=8000, api_key=None, require_auth=None):
     block = format_share_block(share)
     if block:
         print(block + "\033[1;36m")
-    print("  \033[90m(Press CTRL+C or use the Web UI Stop button to control the server)\033[0m")
+    print(f"  \033[90m(Press CTRL+C or use the Web UI Stop button to control the server)\033[0m")
+    print(f"  \033[90m PID {os.getpid()} \u2014 if CTRL+C ever fails, run: kill {os.getpid()}\033[0m")
     print()
     # stdout is block-buffered when it isn't a terminal, and shutdown ends in
     # os._exit(), which skips flushing. Without this the whole banner — API key

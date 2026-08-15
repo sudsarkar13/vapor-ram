@@ -1,17 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import {
-	Geist,
-	Geist_Mono,
-	Noto_Sans,
-	Playfair_Display,
-} from "next/font/google";
+import { Geist, Geist_Mono, Noto_Sans } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
-
-const playfairDisplayHeading = Playfair_Display({
-	subsets: ["latin"],
-	variable: "--font-heading",
-});
 
 const notoSans = Noto_Sans({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -59,7 +49,6 @@ export default function RootLayout({
 				geistMono.variable,
 				"font-sans",
 				notoSans.variable,
-				playfairDisplayHeading.variable,
 			)}>
 			<body className="min-h-full flex flex-col">{children}</body>
 		</html>

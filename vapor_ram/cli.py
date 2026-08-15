@@ -319,6 +319,9 @@ def main():
 
     elif args.command == "serve":
         from . import openai_server
+        # Before anything spawns a thread: a thread that does not block SIGINT
+        # can absorb the CTRL+C that sigwait() is waiting for.
+        openai_server.block_shutdown_signals()
         if args.new_key:
             openai_server.rotate_api_key()
         openai_server.serve(host=args.host, port=args.port, api_key=args.api_key,
@@ -327,6 +330,9 @@ def main():
     elif args.command == "web":
         import threading, time
         from . import openai_server
+        # Must precede the browser-opening thread below, so that thread
+        # inherits the block and cannot swallow CTRL+C.
+        openai_server.block_shutdown_signals()
         host = "0.0.0.0" if args.share else args.host
         share = openai_server.configure_sharing(
             host, args.port, api_key=args.api_key,
