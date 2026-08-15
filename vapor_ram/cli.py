@@ -28,6 +28,65 @@ def get_local_ip():
     except Exception:
         return "127.0.0.1"
 
+def indent_block(text, prefix="    "):
+    return "\n".join(prefix + line for line in text.splitlines())
+
+
+def remote_access_help(port=8000):
+    """Deliberately tunnel-first.
+
+    Forwarding the port on a router publishes a plain HTTP service to the
+    internet, which sends the API key across it in cleartext and lets anyone
+    scanning the address knock on it. A tunnel gives TLS and a hostname
+    without opening anything inbound.
+    """
+    return [
+        "    The LAN URL above only works on this network. For access from anywhere,",
+        "    put a TLS tunnel in front of the server rather than forwarding the port:",
+        "",
+        f"      cloudflared tunnel --url http://localhost:{port}",
+        f"      tailscale serve {port}            # private to your tailnet",
+        f"      ssh -R {port}:localhost:{port} user@your-vps",
+        "",
+        "    Then use the https:// address the tunnel prints as the base URL, with the",
+        "    same API key. If you do forward the port on your router instead, note that",
+        "    plain HTTP sends the key in cleartext — terminate TLS in front of it.",
+    ]
+
+
+def probe_server(port, key):
+    """Ask a running server what it actually requires, instead of assuming.
+
+    Without this, `vapor share` would print a key for a server started with
+    --no-auth, or the stored key for a server started with a different one --
+    telling the user something that does not work.
+
+    Returns (running, auth_required, key_matches).
+    """
+    import urllib.request, urllib.error
+    base = f"http://127.0.0.1:{port}"
+    try:
+        with urllib.request.urlopen(f"{base}/health", timeout=1.5) as r:
+            health = json.loads(r.read().decode())
+    except Exception:
+        return False, None, None
+
+    # /health is public but reports only the engine identity until a valid key
+    # is presented, so auth_required in that thin payload is the honest answer.
+    auth_required = bool(health.get("auth_required"))
+    if not auth_required:
+        return True, False, None
+
+    req = urllib.request.Request(f"{base}/v1/models", headers={"X-API-Key": key or ""})
+    try:
+        with urllib.request.urlopen(req, timeout=1.5):
+            return True, True, True
+    except urllib.error.HTTPError as e:
+        return True, True, e.code != 401
+    except Exception:
+        return True, True, None
+
+
 def list_presets():
     print("=== VaporRAM Persona Presets ===")
     if os.path.exists(PRESETS_DIR):
@@ -78,10 +137,31 @@ def main():
     serve_parser = subparsers.add_parser("serve", help="Host LAN HTTP API server")
     serve_parser.add_argument("--host", default="0.0.0.0", help="Host address (default: 0.0.0.0)")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port number (default: 8000)")
-    serve_parser.add_argument("--api-key", default=None, help="Optional API key authorization")
+    serve_parser.add_argument("--api-key", default=None,
+                              help="API key clients must present (default: generated and reused)")
+    serve_parser.add_argument("--new-key", action="store_true",
+                              help="Issue a fresh API key, revoking the previous one")
+    serve_parser.add_argument("--no-auth", action="store_true",
+                              help="Serve without an API key (anyone who can reach the port can use the model)")
 
     web_parser = subparsers.add_parser("web", help="Launch server and open Web UI in browser")
     web_parser.add_argument("--port", type=int, default=8000, help="Port number (default: 8000)")
+    # Loopback by default: `web` means "open the dashboard here", and binding
+    # every interface is a sharing decision the user should make on purpose.
+    web_parser.add_argument("--host", default="127.0.0.1",
+                            help="Host address (default: 127.0.0.1, local only)")
+    web_parser.add_argument("--share", action="store_true",
+                            help="Bind all interfaces so other devices on the network can connect")
+    web_parser.add_argument("--api-key", default=None, help="API key to require when sharing")
+    web_parser.add_argument("--no-auth", action="store_true",
+                            help="Skip API key authentication even when sharing")
+
+    share_parser = subparsers.add_parser(
+        "share", help="Show the URL, API key and client snippets for other devices")
+    share_parser.add_argument("--port", type=int, default=8000, help="Port the server listens on (default: 8000)")
+    share_parser.add_argument("--new-key", action="store_true",
+                              help="Issue a fresh API key, revoking the previous one")
+    share_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     args = parser.parse_args()
 
@@ -149,10 +229,8 @@ def main():
         print(f" Web UI URL    : \033[1;36mhttp://{local_ip}:8000/\033[0m")
         print(f" API Endpoint  : \033[1;36mhttp://{local_ip}:8000/v1/chat/completions\033[0m")
         print(f" Responses API : \033[1;36mhttp://{local_ip}:8000/v1/responses\033[0m")
-        print("\n Example LAN Request (from another device):")
-        print(f"   curl http://{local_ip}:8000/v1/chat/completions \\")
-        print("     -H 'Content-Type: application/json' \\")
-        print("     -d '{\"model\": \"google/gemma-4-E4B-it\", \"messages\": [{\"role\": \"user\", \"content\": \"Hello!\"}]}'")
+        print("\n Requests from other devices need the API key.")
+        print(" Run \033[1;33mvapor share\033[0m for the key and ready-to-paste client snippets.")
 
     elif args.command == "run":
         from . import openai_server
@@ -241,16 +319,67 @@ def main():
 
     elif args.command == "serve":
         from . import openai_server
-        openai_server.serve(host=args.host, port=args.port, api_key=args.api_key)
+        if args.new_key:
+            openai_server.rotate_api_key()
+        openai_server.serve(host=args.host, port=args.port, api_key=args.api_key,
+                            require_auth=False if args.no_auth else None)
 
     elif args.command == "web":
         import threading, time
+        from . import openai_server
+        host = "0.0.0.0" if args.share else args.host
+        share = openai_server.configure_sharing(
+            host, args.port, api_key=args.api_key,
+            require_auth=False if args.no_auth else None)
+
+        # Open the local dashboard, carrying the key in the URL when one is
+        # required — otherwise `vapor web --share` would launch a browser that
+        # immediately gets a 401 from its own server.
+        local = f"http://localhost:{args.port}/"
+        if share["auth_required"]:
+            local += f"?key={share['api_key']}"
+
         def open_browser():
             time.sleep(1.5)
-            webbrowser.open(f"http://localhost:{args.port}/")
+            webbrowser.open(local)
         threading.Thread(target=open_browser, daemon=True).start()
+        openai_server.serve(host=host, port=args.port, api_key=args.api_key,
+                            require_auth=False if args.no_auth else None)
+
+    elif args.command == "share":
         from . import openai_server
-        openai_server.serve(host="0.0.0.0", port=args.port)
+        key = (openai_server.rotate_api_key() if args.new_key
+               else openai_server.load_persisted_api_key() or openai_server.resolve_api_key())
+        running, auth_required, key_matches = probe_server(args.port, key)
+        info = openai_server.share_urls(
+            host="0.0.0.0", port=args.port, api_key=key,
+            # Describe the live server when there is one; otherwise describe
+            # what `vapor serve` would do, which is require a key.
+            auth_required=True if auth_required is None else auth_required)
+        snippets = openai_server.client_snippets(info)
+        info["server_running"] = running
+
+        if args.json:
+            print(json.dumps({"share": info, "snippets": snippets}, indent=2))
+        else:
+            print(BANNER)
+            print("\033[1;36m  Share this model with another device\033[0m\n")
+            print(openai_server.format_share_block(info))
+            if not running:
+                print(f"\n  \033[1;33m! No server is listening on port {args.port} yet.\033[0m")
+                print(f"  \033[90m  Start one with: \033[0mvapor serve --port {args.port}")
+            elif key_matches is False:
+                print(f"\n  \033[1;33m! The server on port {args.port} rejected this key.\033[0m")
+                print("  \033[90m  It was started with a different --api-key; use that one,\033[0m")
+                print("  \033[90m  or restart it without --api-key to use the stored key.\033[0m")
+            print("\n\033[1;36m  From another device on the same network\033[0m")
+            print("\033[90m" + indent_block(snippets["curl"]) + "\033[0m")
+            print("\n\033[1;36m  Any OpenAI-compatible client\033[0m")
+            print("\033[90m" + indent_block(snippets["openai_python"]) + "\033[0m")
+            print("\n\033[1;36m  Reaching it from outside this network\033[0m")
+            for line in remote_access_help(args.port):
+                print(f"\033[90m{line}\033[0m")
+            print()
 
     else:
         parser.print_help()

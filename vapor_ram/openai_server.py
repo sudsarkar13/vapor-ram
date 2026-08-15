@@ -1,6 +1,6 @@
-import os, sys, json, time, subprocess, mimetypes, threading, re, signal
+import os, sys, json, time, subprocess, mimetypes, threading, re, signal, socket, hmac, secrets
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 from . import paths
 
@@ -26,6 +26,163 @@ DEFAULT_CONTEXT_WINDOW = 8192
 
 VERSION = "1.0.7-alpha.4"
 MODEL_ID = "google/gemma-4-E4B-it"
+
+# --- Network sharing -------------------------------------------------------
+# API_KEY is the shared secret for LAN/remote access. AUTH_REQUIRED is enabled
+# automatically whenever the server binds a non-loopback interface, so making
+# the engine reachable never silently makes it open.
+API_KEY = None
+AUTH_REQUIRED = False
+BIND_HOST = "127.0.0.1"
+BIND_PORT = 8000
+
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", ""}
+
+# Reachable without a key: the dashboard bundle (it contains no secrets and
+# must load before it can ask for one) and a deliberately thin /health.
+PUBLIC_PREFIXES = ("/health",)
+
+
+def generate_api_key():
+    """A key that survives being retyped on a phone but is not guessable."""
+    return "vr_" + secrets.token_urlsafe(18)
+
+
+def load_persisted_api_key():
+    """Read the key from ~/.vapor-ram/api_key, or None if it isn't set yet.
+
+    Persisting it means a restart doesn't invalidate every client that was
+    already configured against this server.
+    """
+    try:
+        with open(paths.api_key_path()) as f:
+            key = f.read().strip()
+        return key or None
+    except Exception:
+        return None
+
+
+def save_api_key(key):
+    """Write the key 0600 so it isn't world-readable on a shared machine."""
+    target = paths.api_key_path()
+    try:
+        with open(target, "w") as f:
+            f.write(key + "\n")
+        os.chmod(target, 0o600)
+        return True
+    except Exception as e:
+        sys.stderr.write(f"[Share] Could not persist API key to {target}: {e}\n")
+        return False
+
+
+def rotate_api_key():
+    """Issue a new key and persist it, invalidating every previously shared one."""
+    key = generate_api_key()
+    save_api_key(key)
+    return key
+
+
+def resolve_api_key(explicit=None):
+    """Precedence: --api-key, then $VAPOR_API_KEY, then the persisted key,
+    then a freshly generated one (which is persisted for next time)."""
+    key = (explicit or os.environ.get("VAPOR_API_KEY") or "").strip()
+    if key:
+        return key
+    key = load_persisted_api_key()
+    if key:
+        return key
+    key = generate_api_key()
+    save_api_key(key)
+    return key
+
+
+def is_loopback(host):
+    return (host or "").strip().lower() in LOOPBACK_HOSTS
+
+
+def get_local_ip():
+    """LAN address other devices can reach, without sending any traffic."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))   # no packets sent for UDP connect
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
+
+
+def share_urls(host=None, port=None, api_key=None, auth_required=None):
+    """Everything a client needs to connect, resolved for the active bind.
+
+    Arguments default to the running server's state so the same function can
+    describe a live server or answer `vapor share` before one is started.
+    """
+    host = BIND_HOST if host is None else host
+    port = BIND_PORT if port is None else port
+    key = API_KEY if api_key is None else api_key
+    needs_key = AUTH_REQUIRED if auth_required is None else auth_required
+
+    shared = not is_loopback(host)
+    lan_ip = get_local_ip() if shared else "127.0.0.1"
+    base = f"http://{lan_ip}:{port}"
+    return {
+        "host": host,
+        "port": port,
+        "lan_ip": lan_ip,
+        "base_url": base,
+        "api_base": f"{base}/v1",
+        "chat_url": f"{base}/v1/chat/completions",
+        # The key rides in the query string so the whole thing is one tappable
+        # link — retyping a token on a phone keyboard is where sharing dies.
+        "dashboard_url": (f"{base}/?key={key}" if needs_key and key else f"{base}/"),
+        "api_key": key if needs_key else None,
+        "auth_required": needs_key,
+        "shared_on_lan": shared,
+    }
+
+
+def client_snippets(info):
+    """Copy-paste clients for the two ways people actually connect."""
+    auth = f' \\\n    -H "Authorization: Bearer {info["api_key"]}"' if info["auth_required"] else ""
+    curl = (
+        f'curl {info["chat_url"]} \\\n'
+        f'    -H "Content-Type: application/json"{auth} \\\n'
+        f"    -d '{{\"model\": \"{MODEL_ID}\", "
+        f'"messages": [{{"role": "user", "content": "Hello!"}}]}}\''
+    )
+    key_line = info["api_key"] or "not-required"
+    openai = (
+        "from openai import OpenAI\n"
+        f'client = OpenAI(base_url="{info["api_base"]}", api_key="{key_line}")\n'
+        "resp = client.chat.completions.create(\n"
+        f'    model="{MODEL_ID}",\n'
+        '    messages=[{"role": "user", "content": "Hello!"}],\n'
+        ")\nprint(resp.choices[0].message.content)"
+    )
+    return {"curl": curl, "openai_python": openai}
+
+
+def format_share_block(info):
+    """Terminal rendering shared by the startup banner and `vapor share`."""
+    c = "\033[1;36m"; w = "\033[1;37m"; y = "\033[1;33m"; g = "\033[32m"; d = "\033[90m"; r = "\033[0m"
+    lines = []
+    if info["shared_on_lan"]:
+        lines.append(f"  {g}\u279c{c}  Shared on LAN   : {w}{info['base_url']}{r}")
+        lines.append(f"  {g}\u279c{c}  API for clients : {w}{info['api_base']}{r}")
+    if info["auth_required"]:
+        lines.append(f"  {g}\u279c{c}  API key         : {y}{info['api_key']}{r}")
+        lines.append(f"  {g}\u279c{c}  One-tap link    : {w}{info['dashboard_url']}{r}")
+        lines.append(f"  {d}   Other devices: send it as 'Authorization: Bearer <key>',{r}")
+        lines.append(f"  {d}   'X-API-Key: <key>', or ?key=<key> on the URL.{r}")
+    elif info["shared_on_lan"]:
+        lines.append(f"  {y}\u279c{c}  API key         : {y}disabled (--no-auth) \u2014 anyone on this network can use the model{r}")
+    return "\n".join(lines)
+
 
 # Architecture defaults match google/gemma-4-E4B-it's text_config. They are overwritten by
 # read_model_architecture() when the active model directory ships a config.json, so the
@@ -650,6 +807,10 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         if any(p in path for p in ("/progress", "/health", "/stats", "/cortex", "/profile", "/assets/")):
             return
 
+        # Shared links carry ?key=<secret>. Logging it verbatim would write the
+        # key into the terminal scrollback and any file the output is piped to.
+        path = re.sub(r"([?&](?:api_)?key=)[^&]*", r"\1***", path)
+
         code = args[1] if len(args) > 1 else "200"
         code = str(code) if code is not None else "???"
         method = self.command if hasattr(self, "command") else "GET"
@@ -686,13 +847,83 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             # the request itself was handled and the response was on its way out.
             pass
 
-    def _check_auth(self):
-        if not VaporRequestHandler.api_key:
+    def _presented_key(self, parsed=None):
+        """Pull the key out of whichever channel the client used.
+
+        Three are accepted because they serve different clients: OpenAI-compatible
+        SDKs send `Authorization: Bearer`, hand-written scripts reach for
+        `X-API-Key`, and a browser opening a shared link can only carry `?key=`.
+        """
+        header = self.headers.get("Authorization", "").strip()
+        if header.lower().startswith("bearer "):
+            token = header[7:].strip()
+            if token:
+                return token
+        token = self.headers.get("X-API-Key", "").strip()
+        if token:
+            return token
+        try:
+            query = parse_qs((parsed or urlparse(self.path)).query)
+            values = query.get("key") or query.get("api_key") or []
+            if values and values[0].strip():
+                return values[0].strip()
+        except Exception:
+            pass
+        return ""
+
+    def _check_auth(self, parsed=None):
+        """True when the request may proceed.
+
+        Compared with compare_digest so a wrong key can't be recovered one
+        character at a time from response timings.
+        """
+        if not AUTH_REQUIRED or not API_KEY:
             return True
-        auth_header = self.headers.get("Authorization", "")
-        api_header = self.headers.get("X-API-Key", "")
-        token = auth_header.replace("Bearer ", "").strip() or api_header.strip()
-        return token == VaporRequestHandler.api_key
+        presented = self._presented_key(parsed)
+        if not presented:
+            return False
+        return hmac.compare_digest(presented, API_KEY)
+
+    def _static_file_for(self, path):
+        """Absolute path of the dashboard asset serving `path`, else None."""
+        if path == "/":
+            path = "/index.html"
+        candidate = os.path.normpath(os.path.join(WEB_DIST, path.lstrip("/")))
+        # normpath collapses any ../ before this check, so the prefix test is
+        # what keeps a crafted path from escaping the dist directory.
+        if candidate.startswith(WEB_DIST) and os.path.isfile(candidate):
+            return candidate
+        return None
+
+    def _is_public(self, path):
+        """Endpoints reachable without a key.
+
+        The dashboard bundle is public because it has to load before it can ask
+        the user for a key, and it contains no secrets. /health is public and
+        deliberately thin so a phone can confirm it reached the right machine.
+        Everything else — including every GET that reports paths, hardware or
+        model state — needs the key.
+        """
+        if any(path.endswith(prefix) for prefix in PUBLIC_PREFIXES):
+            return True
+        return self._static_file_for(path) is not None
+
+    def _authorize(self, path, parsed=None):
+        """Guard for every request. Sends the 401 itself and returns False."""
+        if self._is_public(path) or self._check_auth(parsed):
+            return True
+        info = share_urls()
+        self._send_json({
+            "error": "Unauthorized",
+            "message": (
+                "This VaporRAM server is shared on a network and requires an API key. "
+                "Send it as 'Authorization: Bearer <key>', 'X-API-Key: <key>', or "
+                "?key=<key>. Run `vapor share` on the host machine to see the key."
+            ),
+            "auth_required": True,
+            "dashboard_url_hint": f"{info['base_url']}/?key=YOUR_KEY",
+        }, status=401)
+        return False
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -706,19 +937,46 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = clean_path(parsed.path)
 
+        # Previously only do_POST checked the key, so every GET below — including
+        # /v1/system/progress (filesystem paths) and /v1/doctor (hardware) — was
+        # readable by anyone who could reach the port.
+        if not self._authorize(path, parsed):
+            return
+
         if path.endswith("/health"):
             tele = telemetry_snapshot()
             gguf = find_gguf(current_model_path)
-            return self._send_json({
+            payload = {
                 "status": "ok",
                 "engine": "VaporRAM",
                 "version": VERSION,
                 "model": MODEL_ID,
                 "active_model": MODEL_ID,
                 "format": "GGUF / Int4 SSD Stream",
-                "gguf_file": os.path.basename(gguf) if gguf else None,
                 "connection": "CONNECTED" if tele["model_available"] else "NO_WEIGHTS",
-                **tele,
+            }
+            # /health stays reachable without a key so a client can confirm it
+            # found the right machine, but the telemetry block carries the host's
+            # filesystem paths and RAM figures. Unauthenticated callers get the
+            # identity only; the details need the key like every other endpoint.
+            if self._check_auth(parsed):
+                payload["gguf_file"] = os.path.basename(gguf) if gguf else None
+                payload.update(tele)
+            else:
+                payload["auth_required"] = True
+                payload["detail"] = "Provide the API key to read telemetry."
+            return self._send_json(payload)
+
+        # Connection details for other devices. Authenticated, because it hands
+        # out the key it is protected by.
+        if path.endswith("/share") or path.endswith("/system/share"):
+            info = share_urls()
+            return self._send_json({
+                "status": "ok",
+                "version": VERSION,
+                "model": MODEL_ID,
+                "share": info,
+                "snippets": client_snippets(info),
             })
 
         if path.endswith("/presets"):
@@ -821,11 +1079,8 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             })
 
         # Serve static Web UI assets from web/dist
-        if path == "/":
-            path = "/index.html"
-        
-        file_path = os.path.normpath(os.path.join(WEB_DIST, path.lstrip("/")))
-        if os.path.exists(file_path) and os.path.isfile(file_path) and file_path.startswith(WEB_DIST):
+        file_path = self._static_file_for(path)
+        if file_path:
             mime, _ = mimetypes.guess_type(file_path)
             with open(file_path, "rb") as f:
                 content = f.read()
@@ -843,11 +1098,12 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         global current_model_path, download_progress, n_ctx
-        if not self._check_auth():
-            return self._send_json({"error": "Unauthorized API key", "message": "Unauthorized API key"}, status=401)
-
         parsed = urlparse(self.path)
         path = clean_path(parsed.path)
+
+        if not self._authorize(path, parsed):
+            return
+
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length)
 
@@ -1217,6 +1473,13 @@ def shutdown_server(reason="Server stopped"):
     closer = threading.Thread(target=_close, daemon=True)
     closer.start()
     closer.join(timeout=3.0)
+    # os._exit skips the interpreter's normal flush, so anything still sitting
+    # in a block-buffered stdout would be discarded.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
     os._exit(0)
 
 
@@ -1271,9 +1534,32 @@ def _serve_until_signal(server):
     shutdown_server(reason)
 
 
-def serve(host="0.0.0.0", port=8000, api_key=None):
+def configure_sharing(host, port, api_key=None, require_auth=None):
+    """Decide the auth posture for this bind and return the share details.
+
+    The rule: binding anything other than loopback makes the engine reachable
+    by other machines, so a key is required unless the operator explicitly
+    opts out with require_auth=False. Sharing therefore cannot be switched on
+    by accident without also switching protection on.
+    """
+    global API_KEY, AUTH_REQUIRED, BIND_HOST, BIND_PORT
+
+    BIND_HOST, BIND_PORT = host, port
+    exposed = not is_loopback(host)
+
+    if require_auth is None:
+        AUTH_REQUIRED = exposed or bool(api_key) or bool(os.environ.get("VAPOR_API_KEY"))
+    else:
+        AUTH_REQUIRED = bool(require_auth)
+
+    API_KEY = resolve_api_key(api_key) if AUTH_REQUIRED else None
+    VaporRequestHandler.api_key = API_KEY
+    return share_urls()
+
+
+def serve(host="0.0.0.0", port=8000, api_key=None, require_auth=None):
     global server_instance
-    VaporRequestHandler.api_key = api_key
+    share = configure_sharing(host, port, api_key=api_key, require_auth=require_auth)
     server_instance = VaporHTTPServer((host, port), VaporRequestHandler)
 
     read_model_architecture(current_model_path)
@@ -1290,8 +1576,15 @@ def serve(host="0.0.0.0", port=8000, api_key=None):
     else:
         print(f"  \033[33m\u279c\033[1;36m  Weights         : \033[1;33mnot found in {current_model_path} \033[90m(use the dashboard to download)\033[1;36m")
     print(f"  \033[32m\u279c\033[1;36m  Context Window  : \033[1;37m{n_ctx} tokens \033[90m(engine max {SAFE_GGUF_MAX_CONTEXT})\033[1;36m")
+    block = format_share_block(share)
+    if block:
+        print(block + "\033[1;36m")
     print("  \033[90m(Press CTRL+C or use the Web UI Stop button to control the server)\033[0m")
     print()
+    # stdout is block-buffered when it isn't a terminal, and shutdown ends in
+    # os._exit(), which skips flushing. Without this the whole banner — API key
+    # included — is lost whenever the server is piped to a file or supervisor.
+    sys.stdout.flush()
 
     _serve_until_signal(server_instance)
 

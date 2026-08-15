@@ -83,6 +83,23 @@ def default_model_dir():
     return os.path.join(PARENT_DIR, "models", "gemma-4-E4B-it")
 
 
+def state_dir():
+    """Per-user state that must never live inside the repository.
+
+    The API key goes here rather than in vapor.json because vapor.json is
+    tracked in git — writing a shared secret into it would stage the secret
+    for commit the moment the user changes a setting.
+    """
+    home = os.path.join(os.path.expanduser("~"), ".vapor-ram")
+    os.makedirs(home, exist_ok=True)
+    return home
+
+
+def api_key_path():
+    """File holding the persisted network-sharing API key (mode 0600)."""
+    return os.path.join(state_dir(), "api_key")
+
+
 def config_path():
     """Location of vapor.json.
 

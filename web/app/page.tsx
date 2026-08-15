@@ -7,6 +7,7 @@ import { ChatView } from "@/components/ChatView";
 import { BrainView } from "@/components/BrainView";
 import { ProfilingView } from "@/components/ProfilingView";
 import { DoctorView } from "@/components/DoctorView";
+import { ApiKeyGate } from "@/components/ApiKeyGate";
 import {
 	fetchHealth,
 	fetchProgress,
@@ -66,6 +67,9 @@ export default function VaporDashboardPage() {
 
 	return (
 		<div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 font-sans selection:bg-cyan-500 selection:text-slate-950">
+			{/* Prompts for the key when a shared engine answers 401 */}
+			<ApiKeyGate />
+
 			{/* Top Navigation Header */}
 			<Header
 				activeTab={activeTab}

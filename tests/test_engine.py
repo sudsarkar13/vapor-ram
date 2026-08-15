@@ -9,7 +9,7 @@ static asset serving.
 These tests never require model weights — generation itself is covered by asserting
 that a weightless engine returns a clean 503 rather than a fabricated answer.
 """
-import os, sys, json, time, socket, threading, urllib.request, urllib.error, subprocess
+import os, sys, json, time, socket, threading, urllib.request, urllib.error, subprocess, tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
@@ -35,9 +35,13 @@ def free_port():
         return s.getsockname()[1]
 
 
-def get(url, timeout=10):
-    with urllib.request.urlopen(url, timeout=timeout) as r:
-        return r.status, json.loads(r.read().decode())
+def get(url, timeout=10, headers=None):
+    req = urllib.request.Request(url, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read().decode())
 
 
 def post(url, payload, timeout=30):
@@ -323,12 +327,148 @@ def test_generation_without_weights(port):
         s.current_model_path = original
 
 
+TEST_KEY = "vr_test_key_do_not_persist"
+
+
+def test_network_sharing():
+    """Authenticated sharing. Runs last: enabling auth flips module-level state
+    that every other server in this process shares."""
+    print("\n\033[1;36m[9] Network Sharing & API Key Authentication\033[0m")
+    from vapor_ram import openai_server, paths
+
+    # --- key generation and persistence -----------------------------------
+    key = openai_server.generate_api_key()
+    check("generated key is prefixed", key.startswith("vr_"), key)
+    check("generated key has real entropy", len(key) > 20, f"len={len(key)}")
+    check("generated keys are unique",
+          openai_server.generate_api_key() != openai_server.generate_api_key())
+
+    with tempfile.TemporaryDirectory() as tmp:
+        original = paths.api_key_path
+        paths.api_key_path = lambda: os.path.join(tmp, "api_key")
+        try:
+            openai_server.save_api_key("vr_persisted")
+            check("key round-trips through disk",
+                  openai_server.load_persisted_api_key() == "vr_persisted")
+            mode = oct(os.stat(paths.api_key_path()).st_mode & 0o777)
+            check("key file is not world-readable", mode == "0o600", mode)
+            rotated = openai_server.rotate_api_key()
+            check("rotation replaces the stored key",
+                  rotated != "vr_persisted"
+                  and openai_server.load_persisted_api_key() == rotated)
+        finally:
+            paths.api_key_path = original
+
+    # --- auth posture ------------------------------------------------------
+    info = openai_server.share_urls(host="127.0.0.1", port=1234,
+                                    api_key=None, auth_required=False)
+    check("loopback bind is not treated as shared", info["shared_on_lan"] is False)
+    check("loopback dashboard URL carries no key", "key=" not in info["dashboard_url"])
+
+    info = openai_server.share_urls(host="0.0.0.0", port=1234,
+                                    api_key=TEST_KEY, auth_required=True)
+    check("non-loopback bind is reported as shared", info["shared_on_lan"] is True)
+    check("share URL uses the LAN address, not 0.0.0.0",
+          "0.0.0.0" not in info["base_url"], info["base_url"])
+    check("shared dashboard URL embeds the key", info["dashboard_url"].endswith(TEST_KEY))
+
+    snippets = openai_server.client_snippets(info)
+    check("curl snippet carries the key", TEST_KEY in snippets["curl"])
+    check("OpenAI snippet points at /v1",
+          "/v1" in snippets["openai_python"] and TEST_KEY in snippets["openai_python"])
+
+    # --- live enforcement --------------------------------------------------
+    # Bound to loopback so the suite never actually opens a LAN port, but with
+    # auth forced on to exercise the shared-server code path.
+    port = free_port()
+    openai_server.configure_sharing("127.0.0.1", port,
+                                    api_key=TEST_KEY, require_auth=True)
+    check("explicit key is adopted", openai_server.API_KEY == TEST_KEY)
+
+    server = openai_server.VaporHTTPServer(
+        ("127.0.0.1", port), openai_server.VaporRequestHandler)
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.2},
+                     daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(50):
+        try:
+            get(f"{base}/health", timeout=2)
+            break
+        except Exception:
+            time.sleep(0.2)
+
+    try:
+        # Every GET that reports paths, hardware or model state must be closed.
+        for endpoint in ("/v1/models", "/v1/presets", "/v1/doctor",
+                         "/v1/system/progress", "/v1/system/config", "/v1/stats",
+                         "/v1/share"):
+            code, _ = get(f"{base}{endpoint}")
+            check(f"GET {endpoint} requires a key", code == 401, f"got {code}")
+
+        code, _ = post(f"{base}/v1/system/config", {"n_ctx": 4096})
+        check("POST /v1/system/config requires a key", code == 401, f"got {code}")
+
+        # Three channels, because SDKs, scripts and browsers each have only one.
+        for label, headers, url in (
+            ("Authorization: Bearer", {"Authorization": f"Bearer {TEST_KEY}"}, f"{base}/v1/models"),
+            ("X-API-Key", {"X-API-Key": TEST_KEY}, f"{base}/v1/models"),
+            ("?key= query param", None, f"{base}/v1/models?key={TEST_KEY}"),
+        ):
+            code, _ = get(url, headers=headers)
+            check(f"{label} is accepted", code == 200, f"got {code}")
+
+        code, _ = get(f"{base}/v1/models", headers={"Authorization": "Bearer vr_wrong"})
+        check("wrong key is rejected", code == 401, f"got {code}")
+        code, _ = get(f"{base}/v1/models", headers={"X-API-Key": TEST_KEY[:-1]})
+        check("truncated key is rejected", code == 401, f"got {code}")
+
+        # The dashboard bundle stays public: it must load before it can ask for
+        # a key, and it holds no secrets.
+        req = urllib.request.Request(f"{base}/")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            check("dashboard loads without a key", r.status == 200, f"got {r.status}")
+
+        code, body = get(f"{base}/health")
+        check("/health answers without a key", code == 200, f"got {code}")
+        check("/health hides telemetry without a key",
+              "model_path" not in body and body.get("auth_required") is True,
+              str(sorted(body))[:120])
+        check("/health still identifies the engine",
+              body.get("engine") == "VaporRAM" and "version" in body)
+
+        code, body = get(f"{base}/health", headers={"X-API-Key": TEST_KEY})
+        check("/health returns telemetry with a key",
+              TELEMETRY_KEYS.issubset(body.keys()),
+              str(sorted(TELEMETRY_KEYS - set(body)))[:120])
+
+        code, body = get(f"{base}/v1/share", headers={"X-API-Key": TEST_KEY})
+        check("/v1/share returns connection details",
+              code == 200 and body["share"]["api_key"] == TEST_KEY
+              and "curl" in body["snippets"], f"got {code}")
+
+        code, body = get(f"{base}/v1/models")
+        check("401 body explains how to send the key",
+              "Authorization" in body.get("message", "")
+              and "vapor share" in body.get("message", ""), str(body)[:120])
+    finally:
+        server.shutdown()
+        server.server_close()
+        openai_server.configure_sharing("127.0.0.1", 8000, require_auth=False)
+
+
 def main():
     print("=" * 60)
     print("   VaporRAM Integration Test Suite")
     print("=" * 60)
 
     from vapor_ram import openai_server
+
+    # The suite exercises endpoints that call save_active_config(). Left alone
+    # those writes land on the developer's real vapor.json and silently reset
+    # their RAM ceiling and context window, so redirect config persistence at a
+    # throwaway file for the duration of the run.
+    tmp_cfg = tempfile.mkdtemp(prefix="vapor-test-")
+    openai_server.VAPOR_CONFIG_PATH = os.path.join(tmp_cfg, "vapor.json")
 
     port = free_port()
     threading.Thread(
@@ -355,6 +495,7 @@ def main():
     test_presets_and_download(port)
     test_concurrency_and_assets(port)
     test_generation_without_weights(port)
+    test_network_sharing()
 
     print("\n" + "=" * 60)
     if FAILED:

@@ -137,9 +137,74 @@ const getBaseUrl = () => {
 	return "http://localhost:8000";
 };
 
+/* --- API key ------------------------------------------------------------
+ * A shared server hands out links of the form http://host:8000/?key=...
+ * so a phone only has to open one URL. The key is lifted out of the query
+ * string on first load, kept in localStorage, and stripped from the address
+ * bar so it does not sit in screenshots or browser history.
+ */
+const KEY_STORAGE = "vapor-ram.api-key";
+let apiKey: string | null = null;
+let keyLoaded = false;
+
+const unauthorizedListeners = new Set<() => void>();
+
+/** Subscribe to 401s so the UI can ask for a key. Returns an unsubscribe fn. */
+export function onUnauthorized(fn: () => void): () => void {
+	unauthorizedListeners.add(fn);
+	return () => unauthorizedListeners.delete(fn);
+}
+
+function notifyUnauthorized() {
+	unauthorizedListeners.forEach((fn) => fn());
+}
+
+export function getApiKey(): string | null {
+	if (keyLoaded || typeof window === "undefined") return apiKey;
+	keyLoaded = true;
+	try {
+		const url = new URL(window.location.href);
+		const fromUrl = url.searchParams.get("key");
+		if (fromUrl) {
+			apiKey = fromUrl;
+			window.localStorage.setItem(KEY_STORAGE, fromUrl);
+			url.searchParams.delete("key");
+			window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+		} else {
+			apiKey = window.localStorage.getItem(KEY_STORAGE);
+		}
+	} catch {
+		/* Private-mode browsers can throw on storage access; run keyless. */
+	}
+	return apiKey;
+}
+
+export function setApiKey(key: string | null) {
+	apiKey = key && key.trim() ? key.trim() : null;
+	keyLoaded = true;
+	try {
+		if (apiKey) window.localStorage.setItem(KEY_STORAGE, apiKey);
+		else window.localStorage.removeItem(KEY_STORAGE);
+	} catch {
+		/* ignore */
+	}
+}
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+	const key = getApiKey();
+	return key ? { ...(extra ?? {}), Authorization: `Bearer ${key}` } : { ...(extra ?? {}) };
+}
+
 async function getJson<T>(path: string, label: string): Promise<T | null> {
 	try {
-		const res = await fetch(`${getBaseUrl()}${path}`, { cache: "no-store" });
+		const res = await fetch(`${getBaseUrl()}${path}`, {
+			cache: "no-store",
+			headers: authHeaders(),
+		});
+		if (res.status === 401) {
+			notifyUnauthorized();
+			return null;
+		}
 		if (res.ok) return (await res.json()) as T;
 	} catch (e) {
 		console.warn(`VaporRAM ${label} unreachable:`, e);
@@ -155,9 +220,10 @@ async function postJson<T>(
 	try {
 		const res = await fetch(`${getBaseUrl()}${path}`, {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
+			headers: authHeaders({ "Content-Type": "application/json" }),
 			body: JSON.stringify(body),
 		});
+		if (res.status === 401) notifyUnauthorized();
 		// 4xx bodies carry an actionable `message`, so parse them rather than
 		// discarding the response.
 		const data = (await res.json().catch(() => null)) as T | null;
@@ -165,6 +231,19 @@ async function postJson<T>(
 	} catch (e) {
 		console.warn(`VaporRAM ${label} failed:`, e);
 		return null;
+	}
+}
+
+/** Verifies a key against the server before the UI commits to storing it. */
+export async function verifyApiKey(key: string): Promise<boolean> {
+	try {
+		const res = await fetch(`${getBaseUrl()}/v1/share`, {
+			cache: "no-store",
+			headers: { Authorization: `Bearer ${key.trim()}` },
+		});
+		return res.ok;
+	} catch {
+		return false;
 	}
 }
 
@@ -185,7 +264,10 @@ export async function fetchPresets(): Promise<VaporPreset[]> {
 
 export async function stopServer(): Promise<boolean> {
 	try {
-		const res = await fetch(`${getBaseUrl()}/v1/system/stop`, { method: "POST" });
+		const res = await fetch(`${getBaseUrl()}/v1/system/stop`, {
+			method: "POST",
+			headers: authHeaders(),
+		});
 		return res.ok;
 	} catch {
 		return false;
@@ -194,7 +276,10 @@ export async function stopServer(): Promise<boolean> {
 
 export async function restartServer(): Promise<boolean> {
 	try {
-		const res = await fetch(`${getBaseUrl()}/v1/system/restart`, { method: "POST" });
+		const res = await fetch(`${getBaseUrl()}/v1/system/restart`, {
+			method: "POST",
+			headers: authHeaders(),
+		});
 		return res.ok;
 	} catch {
 		return false;
@@ -241,7 +326,7 @@ export async function streamChatCompletions(
 	try {
 		const response = await fetch(`${getBaseUrl()}/v1/chat/completions`, {
 			method: "POST",
-			headers: { "Content-Type": "application/json" },
+			headers: authHeaders({ "Content-Type": "application/json" }),
 			body: JSON.stringify({
 				model: "google/gemma-4-E4B-it",
 				messages,
@@ -254,6 +339,7 @@ export async function streamChatCompletions(
 			signal,
 		});
 
+		if (response.status === 401) notifyUnauthorized();
 		if (!response.ok) {
 			let detail = `HTTP ${response.status}`;
 			try {

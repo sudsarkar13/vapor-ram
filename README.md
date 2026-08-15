@@ -128,6 +128,74 @@ Start the server and automatically launch the Web UI in your default browser:
 ./vapor web
 ```
 
+`vapor web` binds `127.0.0.1` — the dashboard is reachable from this machine
+only. Add `--share` to open it to the rest of the network.
+
+### 6. Sharing the Model Across Devices
+
+`vapor serve` binds every interface, so any device on the same network can
+talk to the model. Because that also means anyone on that network can, the
+server requires an API key whenever it is not bound to loopback. The key is
+generated on first use and stored in `~/.vapor-ram/api_key` (mode `0600`), so
+clients configured once keep working across restarts.
+
+```bash
+./vapor serve            # shared on the LAN, key required
+./vapor share            # print the URL, key and ready-to-paste clients
+```
+
+`vapor share` prints something like:
+
+```
+  ➜  Shared on LAN   : http://192.168.1.24:8000
+  ➜  API for clients : http://192.168.1.24:8000/v1
+  ➜  API key         : vr_8ZqK1sT4bN0pWm7xVhQrLdY2
+  ➜  One-tap link    : http://192.168.1.24:8000/?key=vr_8ZqK1sT4bN0pWm7xVhQrLdY2
+```
+
+Clients may present the key three ways — pick whichever your client supports:
+
+| Channel | Example | Best for |
+| :--- | :--- | :--- |
+| `Authorization: Bearer` | `-H "Authorization: Bearer vr_..."` | OpenAI-compatible SDKs |
+| `X-API-Key` | `-H "X-API-Key: vr_..."` | scripts and `curl` |
+| `?key=` query param | `http://host:8000/?key=vr_...` | opening the dashboard on a phone |
+
+Any OpenAI client works by pointing `base_url` at the shared address:
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://192.168.1.24:8000/v1", api_key="vr_...")
+```
+
+Opening the one-tap link on another device loads the dashboard, stores the key
+in that browser, and strips it from the address bar. Visiting the bare host
+instead prompts for the key.
+
+**Key management**
+
+| Command | Effect |
+| :--- | :--- |
+| `./vapor serve --api-key mykey` | use a specific key instead of the generated one |
+| `./vapor serve --new-key` | issue a new key, revoking the old one |
+| `./vapor serve --no-auth` | serve with no key at all — everyone on the network gets access |
+| `VAPOR_API_KEY=...` | set the key from the environment |
+
+**Access from outside the network**
+
+The LAN address only works locally. To reach the model from anywhere, put a
+TLS tunnel in front of the server rather than forwarding the port on your
+router — plain HTTP would send the API key across the internet in cleartext:
+
+```bash
+cloudflared tunnel --url http://localhost:8000
+tailscale serve 8000            # private to your tailnet
+ssh -R 8000:localhost:8000 user@your-vps
+```
+
+Then use the `https://` address the tunnel prints as the base URL, with the
+same API key.
+
 ---
 
 ## Configuration & Preset Flags
@@ -141,6 +209,8 @@ You can customize execution using presets or flags:
 | `./vapor inspect` | Inspect model weight files and tensor layout |
 | `./vapor bench` | Run AVX2 SIMD core throughput benchmark |
 | `./vapor presets` | List available persona presets (`coder`, `reasoner`, `concise`) |
+| `./vapor share` | Show the URL, API key and client snippets for other devices |
+| `./vapor lan` | Show this machine's LAN address |
 
 ---
 
