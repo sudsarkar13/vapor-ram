@@ -33,3 +33,9 @@ node_modules/
 vapor-ram-v*.tar.gz
 vapor-ram-v*.zip
 .venv/
+
+# Runtime assets staged into the package at build time (see setup.py)
+vapor_ram/web/
+vapor_ram/presets/
+vapor_ram/tools/
+vapor_ram/c/

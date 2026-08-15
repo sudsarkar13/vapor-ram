@@ -16,11 +16,11 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # (relative path, regex with a single capture group for the version, template for --set)
 TARGETS = [
-    ("version.py",              r'__version__\s*=\s*"([^"]+)"',                 '__version__ = "{v}"'),
+    ("vapor_ram/version.py",   r'__version__\s*=\s*"([^"]+)"',                 '__version__ = "{v}"'),
     ("setup.py",                r'version\s*=\s*"([^"]+)"',                     'version="{v}"'),
     ("pyproject.toml",          r'^version\s*=\s*"([^"]+)"',                    'version = "{v}"'),
-    ("openai_server.py",        r'^VERSION\s*=\s*"([^"]+)"',                    'VERSION = "{v}"'),
-    ("vapor",                   r'💨 VaporRAM v([0-9][^\s\\]*)',                 '💨 VaporRAM v{v}'),
+    ("vapor_ram/openai_server.py", r'^VERSION\s*=\s*"([^"]+)"',                    'VERSION = "{v}"'),
+    
     ("c/vapor_engine.c",        r'VaporRAM Engine v([0-9][^\s\\]*)',            'VaporRAM Engine v{v}'),
     ("tools/package_release.py", r'^VERSION\s*=\s*"([^"]+)"',                   'VERSION = "{v}"'),
     ("tools/download_model.py", r'USER_AGENT\s*=\s*"VaporRAM/([^\s"]+)',        'USER_AGENT = "VaporRAM/{v}'),

@@ -2,12 +2,17 @@ import os, sys, json, time, subprocess, mimetypes, threading, re, signal
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-WEB_DIST = os.path.join(HERE, "web", "dist")
-ENGINE_BIN = os.path.join(HERE, "c", "vapor_engine")
-DEFAULT_MODEL_DIR = os.path.join(HERE, "models", "gemma-4-E4B-it")
-VAPOR_CONFIG_PATH = os.path.join(HERE, "vapor.json")
-PRESETS_DIR = os.path.join(HERE, "presets")
+from . import paths
+
+# Asset locations differ between a git checkout and an installed package;
+# vapor_ram.paths resolves both. HERE stays the anchor for user-supplied
+# relative paths so they mean the same thing however VaporRAM was installed.
+HERE = paths.install_root()
+WEB_DIST = paths.web_dist()
+ENGINE_BIN = paths.engine_bin()
+DEFAULT_MODEL_DIR = paths.default_model_dir()
+VAPOR_CONFIG_PATH = paths.config_path()
+PRESETS_DIR = paths.presets_dir()
 
 # Gemma 4 E4B-it was trained with max_position_embeddings=131072 (sliding window 512).
 # MODEL_MAX_CONTEXT is what the *architecture* allows; SAFE_GGUF_MAX_CONTEXT is what this
@@ -19,7 +24,7 @@ SAFE_GGUF_MAX_CONTEXT = 16384
 MIN_CONTEXT_WINDOW = 512
 DEFAULT_CONTEXT_WINDOW = 8192
 
-VERSION = "1.0.7-alpha.3"
+VERSION = "1.0.7-alpha.4"
 MODEL_ID = "google/gemma-4-E4B-it"
 
 # Architecture defaults match google/gemma-4-E4B-it's text_config. They are overwritten by
@@ -80,7 +85,7 @@ def clamp_context(requested):
 
 
 try:
-    from config import load_config as _load_vapor_config
+    from .config import load_config as _load_vapor_config
     _vapor_cfg = _load_vapor_config(VAPOR_CONFIG_PATH)
     n_ctx = int(_vapor_cfg.get("n_ctx", DEFAULT_CONTEXT_WINDOW))
     ram_ceiling_gb = float(_vapor_cfg.get("ram_ceiling_gb", 1.5))
@@ -90,7 +95,7 @@ except Exception:
 n_ctx, _ = clamp_context(n_ctx)
 
 try:
-    import doctor
+    from . import doctor
 except Exception:
     doctor = None
 
@@ -394,7 +399,7 @@ def restore_saved_model_dir():
 
 def download_default_repo():
     try:
-        sys.path.insert(0, os.path.join(HERE, "tools"))
+        paths.ensure_tools_importable()
         import download_model  # type: ignore[import-not-found]
         return download_model.REPO_ID
     except Exception:
@@ -993,7 +998,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
 
             def run_dl():
                 global download_progress
-                sys.path.insert(0, os.path.join(HERE, "tools"))
+                paths.ensure_tools_importable()
                 try:
                     import download_model  # type: ignore[import-not-found]
 

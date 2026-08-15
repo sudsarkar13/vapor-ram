@@ -8,7 +8,7 @@ Compiles binaries, packages assets, and builds standalone distribution packages:
 import os, sys, shutil, tarfile, subprocess, platform
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VERSION = "1.0.7-alpha.3"
+VERSION = "1.0.7-alpha.4"
 
 def create_release():
     print(f"=== VaporRAM Release Packager v{VERSION} ===")
@@ -35,7 +35,7 @@ def create_release():
     os.makedirs(build_dir_macos)
 
     print("2. Copying scripts, LICENSE, presets, and Web UI assets...")
-    root_files = ["vapor", "doctor.py", "resource_plan.py", "openai_server.py", "config.py", "version.py", "README.md", "LICENSE"]
+    root_files = ["vapor", "README.md", "LICENSE", "vapor.json"]
     for f in root_files:
         src = os.path.join(HERE, f)
         if os.path.exists(src):
@@ -49,7 +49,7 @@ def create_release():
         ".yarn", ".turbo", "*.tsbuildinfo",
     )
 
-    for dir_name in ["c", "tools", "presets"]:
+    for dir_name in ["c", "tools", "presets", "vapor_ram"]:
         src_dir = os.path.join(HERE, dir_name)
         if os.path.exists(src_dir):
             shutil.copytree(src_dir, os.path.join(build_dir_linux, dir_name),

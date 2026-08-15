@@ -79,7 +79,7 @@ def test_c_engine():
 
 def test_unit_logic():
     print("\n[2/7] Pure logic (no server)")
-    import openai_server as s
+    from vapor_ram import openai_server as s
 
     eff, clamped = s.clamp_context(131072)
     check("context clamps above safe max", eff == s.SAFE_GGUF_MAX_CONTEXT and clamped,
@@ -169,7 +169,7 @@ def test_context_honesty(port):
     check("undersized context is refused", status == 400, f"got {status}")
 
     # Whatever the API reports must be what generation would actually use.
-    import openai_server as s
+    from vapor_ram import openai_server as s
     _, health = get(f"{base}/health")
     check("reported n_ctx equals engine n_ctx", health["n_ctx"] == s.n_ctx,
           f"API says {health['n_ctx']}, engine holds {s.n_ctx}")
@@ -292,7 +292,7 @@ def test_concurrency_and_assets(port):
 def test_generation_without_weights(port):
     """A weightless engine must fail loudly, never invent a plausible answer."""
     print("\n[bonus] Weightless failure mode")
-    import openai_server as s
+    from vapor_ram import openai_server as s
     base = f"http://127.0.0.1:{port}"
     original = s.current_model_path
     s.current_model_path = os.path.join(HERE, "presets")  # exists, but holds no .gguf
@@ -311,7 +311,7 @@ def main():
     print("   VaporRAM Integration Test Suite")
     print("=" * 60)
 
-    import openai_server
+    from vapor_ram import openai_server
 
     port = free_port()
     threading.Thread(

@@ -9,6 +9,7 @@ include LICENSE
 include CHANGELOG.md
 include RELEASE_NOTES.md
 include vapor
+recursive-include vapor_ram *.py
 include vapor.json
 include vapor.service
 include MANIFEST.in
@@ -31,6 +32,10 @@ recursive-include tests *.py
 prune web/node_modules
 prune web/.next
 prune build
+prune vapor_ram/web
+prune vapor_ram/presets
+prune vapor_ram/tools
+prune vapor_ram/c
 prune dist_build
 global-exclude *.pyc *.o *.so
 global-exclude .DS_Store
