@@ -1,32 +1,187 @@
-name: VaporRAM CI/CD Pipeline
+name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUNBUFFERED: "1"
 
 jobs:
-  build-and-test:
+  version-consistency:
+    name: Version consistency
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # A release is only reproducible if every manifest agrees on the version.
+      - name: Verify version strings agree
+        run: python3 tools/check_version.py
+
+  engine:
+    name: Engine (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.9", "3.12"]
+        # Full matrix on Linux; macOS only needs one interpreter to prove portability.
+        exclude:
+          - os: macos-latest
+            python-version: "3.9"
 
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
 
-    - name: Build C SIMD Engine
-      run: |
-        make -C c
+      - name: Install OpenMP (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libomp || true
 
-    - name: Run Automated Test Suite
-      run: |
-        python3 tests/test_engine.py
+      - name: Build C SIMD engine
+        run: make -C c
 
-    - name: Run RAM Ceiling Benchmark
-      run: |
-        python3 tools/bench.py
+      - name: Byte-compile Python sources
+        run: python3 -m compileall -q openai_server.py config.py doctor.py resource_plan.py vapor tools/
+
+      - name: Run integration test suite
+        run: python3 tests/test_engine.py
+
+      - name: Resource planner sanity check
+        run: python3 resource_plan.py
+
+      - name: Doctor diagnostics
+        run: python3 doctor.py
+
+  web:
+    name: Web dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack (yarn 4)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: yarn lint
+
+      - name: Build static export
+        run: yarn build
+
+      # web/dist is committed because the Python package serves it directly.
+      # We check that the committed export is internally consistent — every asset
+      # index.html references is present — rather than diffing against a fresh
+      # build: Turbopack chunk names are content-addressed per build and are not
+      # reproducible run-to-run, so an equality check would fail spuriously.
+      - name: Verify committed dashboard is complete
+        working-directory: .
+        run: python3 tools/check_web_dist.py
+
+  package:
+    name: Package build
+    runs-on: ubuntu-latest
+    needs: [version-consistency, engine, web]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build C engine
+        run: make -C c
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Validate package metadata
+        run: twine check dist/*
+
+      # The sdist must be able to build a working install on its own: dashboard,
+      # presets and C sources included. A bare-modules sdist produces a server
+      # that 404s its own web UI.
+      - name: Verify sdist completeness
+        run: |
+          SDIST=$(ls dist/*.tar.gz)
+          echo "Inspecting $SDIST"
+          MISSING=0
+          for required in "web/dist/index.html" "presets/coder.json" "c/vapor_engine.c" "c/Makefile" "vapor"; do
+            if tar tzf "$SDIST" | grep -q "/$required$"; then
+              echo "  ok       $required"
+            else
+              echo "::error::sdist is missing $required"
+              MISSING=1
+            fi
+          done
+          CHUNKS=$(tar tzf "$SDIST" | grep -c "web/dist/_next/static/chunks/.*\.js" || true)
+          if [ "$CHUNKS" -lt 1 ]; then
+            echo "::error::sdist contains no dashboard JS chunks — the web UI would render blank"
+            MISSING=1
+          else
+            echo "  ok       $CHUNKS dashboard JS chunks"
+          fi
+          exit $MISSING
+
+      - name: Verify the wheel installs and runs
+        run: |
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install --quiet dist/*.whl
+          /tmp/verify/bin/python -c "import version; print('installed version', version.__version__)"
+
+      - name: Report wheel payload
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          web = sum("web/dist" in n for n in names)
+          presets = sum("presets/" in n for n in names)
+          print(f"wheel entries: {len(names)}  web/dist: {web}  presets: {presets}")
+          if not web:
+              print("::warning::The wheel carries no dashboard assets. Installing via "
+                    "`pip install vapor-ram` yields a CLI whose web UI cannot be served. "
+                    "The sdist is complete; fixing the wheel requires moving the modules "
+                    "into a real package directory so package_data applies.")
+          PY
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/*
+          retention-days: 14

@@ -1,0 +1,378 @@
+name: Release
+
+# Cutting a release is tag-driven. Push an annotated tag and this pipeline
+# validates it, builds every artifact, publishes the GitHub Release on the
+# correct channel, and uploads to PyPI via OIDC Trusted Publishing.
+#
+#   Stable : v1.0.7          -> latest release, not a prerelease
+#   Beta   : v1.0.7-beta.1   -> prerelease
+#   Alpha  : v1.0.7-alpha.3  -> prerelease
+#   RC     : v1.0.7-rc.1     -> prerelease
+#
+# The tag must match the version already committed in every manifest
+# (enforced by tools/check_version.py), so a release can never ship a
+# version string the source doesn't declare.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v1.0.7-beta.1)"
+        required: true
+      skip_pypi:
+        description: "Skip the PyPI upload"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Resolve the tag into a version + channel, and refuse to proceed unless the
+  # committed manifests declare exactly that version.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Validate tag and version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      channel: ${{ steps.resolve.outputs.channel }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+      title: ${{ steps.resolve.outputs.title }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve version and channel
+        id: resolve
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]]; then
+            echo "::error::Tag '$TAG' is not a valid release version."
+            echo "::error::Expected vX.Y.Z, vX.Y.Z-alpha.N, vX.Y.Z-beta.N or vX.Y.Z-rc.N"
+            exit 1
+          fi
+
+          case "$VERSION" in
+            *-alpha.*) CHANNEL=alpha;  PRERELEASE=true;  LABEL="Alpha Release"   ;;
+            *-beta.*)  CHANNEL=beta;   PRERELEASE=true;  LABEL="Beta Release"    ;;
+            *-rc.*)    CHANNEL=rc;     PRERELEASE=true;  LABEL="Release Candidate";;
+            *)         CHANNEL=stable; PRERELEASE=false; LABEL="Stable Release"  ;;
+          esac
+
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "channel=$CHANNEL"
+            echo "prerelease=$PRERELEASE"
+            echo "title=$TAG — $LABEL"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "### Release $TAG" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: \`$VERSION\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Channel: **$CHANNEL**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Prerelease: \`$PRERELEASE\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Assert manifests declare this version
+        run: python3 tools/check_version.py --expect "${{ steps.resolve.outputs.version }}"
+
+      - name: Require release notes for this version
+        run: |
+          if [ ! -f RELEASE_NOTES.md ]; then
+            echo "::error::RELEASE_NOTES.md is missing."
+            exit 1
+          fi
+          if ! grep -q "${{ steps.resolve.outputs.version }}" RELEASE_NOTES.md; then
+            echo "::error::RELEASE_NOTES.md does not mention ${{ steps.resolve.outputs.version }}."
+            echo "::error::Release notes must describe the version being released."
+            exit 1
+          fi
+
+      - name: Require a changelog entry
+        run: |
+          if ! grep -q "\[v${{ steps.resolve.outputs.version }}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '[v${{ steps.resolve.outputs.version }}]' section."
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Full test suite must pass against the exact tagged tree before anything ships.
+  # ---------------------------------------------------------------------------
+  verify:
+    name: Verify (${{ matrix.os }})
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install OpenMP (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libomp || true
+
+      - name: Build C engine
+        run: make -C c
+
+      - name: Verify committed dashboard is complete
+        run: python3 tools/check_web_dist.py
+
+      - name: Run integration test suite
+        run: python3 tests/test_engine.py
+
+  # ---------------------------------------------------------------------------
+  # Standalone OS tarballs, built natively per platform.
+  # ---------------------------------------------------------------------------
+  tarballs:
+    name: Standalone tarball (${{ matrix.os }})
+    needs: [validate, verify]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: linux
+          - os: macos-latest
+            artifact: macos
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install OpenMP (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libomp || true
+
+      - name: Build standalone distribution
+        run: python3 tools/package_release.py
+
+      - name: Collect tarballs
+        run: |
+          mkdir -p out
+          # package_release.py emits both platform names; keep only this runner's.
+          find . -maxdepth 1 -name "vapor-ram-v*-${{ matrix.artifact }}*.tar.gz" -exec mv {} out/ \;
+          ls -lh out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball-${{ matrix.artifact }}
+          path: out/*.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # PyPI distributions. Built once, reused by both the release and the upload.
+  # ---------------------------------------------------------------------------
+  build-dist:
+    name: Build Python distributions
+    needs: [validate, verify]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build C engine
+        run: make -C c
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Validate metadata
+        run: twine check dist/*
+
+      - name: Assert artifact version matches the tag
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          # PEP 440 normalises 1.0.7-alpha.3 to 1.0.7a3 in filenames.
+          NORMALISED="$(python -c "
+          from packaging.version import Version
+          print(Version('$VERSION'))
+          " 2>/dev/null || echo "$VERSION")"
+          echo "Looking for $NORMALISED in dist/"
+          ls dist/
+          if ! ls dist/ | grep -qF "$NORMALISED"; then
+            echo "::error::Built artifacts do not carry version $NORMALISED"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/*
+          retention-days: 7
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Publish the GitHub Release. Prereleases are flagged; only stable is "latest".
+  # ---------------------------------------------------------------------------
+  github-release:
+    name: Publish GitHub Release
+    needs: [validate, tarballs, build-dist]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Stage release assets
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.whl" \) -exec cp {} release/ \;
+          ls -lh release/
+
+      - name: Compose release notes
+        run: |
+          {
+            cat RELEASE_NOTES.md
+            echo ""
+            echo "---"
+            echo ""
+            echo "**Channel**: \`${{ needs.validate.outputs.channel }}\`"
+            echo ""
+            echo "### Install"
+            echo '```bash'
+            if [ "${{ needs.validate.outputs.prerelease }}" = "true" ]; then
+              echo "pip install --pre vapor-ram==${{ needs.validate.outputs.version }}"
+            else
+              echo "pip install vapor-ram==${{ needs.validate.outputs.version }}"
+            fi
+            echo '```'
+          } > FINAL_NOTES.md
+          cat FINAL_NOTES.md
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FLAGS=(--title "${{ needs.validate.outputs.title }}" --notes-file FINAL_NOTES.md)
+          if [ "${{ needs.validate.outputs.prerelease }}" = "true" ]; then
+            FLAGS+=(--prerelease --latest=false)
+          else
+            FLAGS+=(--latest)
+          fi
+
+          if gh release view "${{ needs.validate.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Release exists — updating assets and notes."
+            gh release edit "${{ needs.validate.outputs.tag }}" "${FLAGS[@]}"
+            gh release upload "${{ needs.validate.outputs.tag }}" release/* --clobber
+          else
+            gh release create "${{ needs.validate.outputs.tag }}" release/* "${FLAGS[@]}"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # PyPI upload via OIDC Trusted Publishing (no long-lived API token).
+  # Runs last so a publish failure never leaves a half-made GitHub Release.
+  # ---------------------------------------------------------------------------
+  pypi-publish:
+    name: Publish to PyPI
+    needs: [validate, build-dist, github-release]
+    if: github.event.inputs.skip_pypi != 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/vapor-ram/${{ needs.validate.outputs.version }}
+    permissions:
+      id-token: write # required for Trusted Publishing
+      contents: read
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist
+
+      - name: List artifacts
+        run: ls -lh dist/
+
+      - name: Publish with PEP 740 attestations
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true
+          print-hash: true
+
+  # ---------------------------------------------------------------------------
+  # Keep the GitHub Pages docs pointing at the newest stable release.
+  # Prereleases deliberately do not move the docs.
+  # ---------------------------------------------------------------------------
+  docs:
+    name: Sync documentation
+    needs: [validate, github-release]
+    if: needs.validate.outputs.channel == 'stable'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ github.token }}
+
+      - name: Update version references in docs
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          TAG="${{ needs.validate.outputs.tag }}"
+          # Point every release link at the tag just published.
+          sed -i -E "s#releases/tag/v[0-9]+\.[0-9]+\.[0-9]+(-[a-z]+\.[0-9]+)?#releases/tag/${TAG}#g" docs/index.html
+          sed -i -E "s#v[0-9]+\.[0-9]+\.[0-9]+(-[a-z]+\.[0-9]+)? Release#${TAG} Release#g" docs/index.html
+          git diff --stat
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet; then
+            echo "Docs already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          git commit -m "docs: sync GitHub Pages to ${{ needs.validate.outputs.tag }}"
+          git push
