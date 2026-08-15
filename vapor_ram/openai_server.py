@@ -1184,49 +1184,117 @@ class VaporHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
 
+SHUTDOWN_SIGNALS = tuple(
+    sig for sig in (getattr(signal, "SIGINT", None), getattr(signal, "SIGTERM", None))
+    if sig is not None
+)
+
+
+def shutdown_server(reason="Server stopped"):
+    """Stop the HTTP server and exit, without hanging on in-flight work.
+
+    The socket close runs on a helper thread with a bounded join: a generation
+    stuck inside llama.cpp must not be able to prevent the process from exiting.
+    """
+    sys.stderr.write(f"\n\033[33m[VaporRAM] {reason}\033[0m\n")
+    try:
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+    def _close():
+        try:
+            if server_instance is not None:
+                server_instance.shutdown()
+        except Exception:
+            pass
+        try:
+            if server_instance is not None:
+                server_instance.server_close()
+        except Exception:
+            pass
+
+    closer = threading.Thread(target=_close, daemon=True)
+    closer.start()
+    closer.join(timeout=3.0)
+    os._exit(0)
+
+
+def _serve_until_signal(server):
+    """Block until SIGINT/SIGTERM, then shut down.
+
+    Waits with sigwait() on a dedicated thread-blocked signal set rather than
+    relying on a Python-level handler. A handler only runs when the *main
+    thread* reaches the eval loop, which does not happen while llama.cpp is
+    loading weights or decoding tokens -- so CTRL+C was silently ignored for
+    the entire time the engine was actually busy, which is exactly when a user
+    reaches for it.
+
+    sigwait() is a blocking syscall that returns as soon as the signal is
+    queued, so it is unaffected by interpreter-level starvation.
+    """
+    usable = (
+        SHUTDOWN_SIGNALS
+        and hasattr(signal, "pthread_sigmask")
+        and hasattr(signal, "sigwait")
+        and threading.current_thread() is threading.main_thread()
+    )
+
+    if not usable:
+        # Non-main thread (e.g. the test suite) or a platform without
+        # pthread_sigmask: fall back to serving inline.
+        server.serve_forever(poll_interval=0.5)
+        return
+
+    # Block the shutdown signals in this thread; worker threads created after
+    # this inherit the mask, so nothing else can consume them first.
+    signal.pthread_sigmask(signal.SIG_BLOCK, SHUTDOWN_SIGNALS)
+
+    worker = threading.Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": 0.5},
+        name="vapor-http",
+        daemon=True,
+    )
+    worker.start()
+
+    try:
+        sig = signal.sigwait(SHUTDOWN_SIGNALS)
+        name = signal.Signals(sig).name
+    except (KeyboardInterrupt, InterruptedError):
+        name = "SIGINT"
+    except Exception:
+        name = "signal"
+
+    reason = ("Server stopped via terminal (CTRL+C)."
+              if name == "SIGINT" else f"Server stopped ({name}).")
+    shutdown_server(reason)
+
+
 def serve(host="0.0.0.0", port=8000, api_key=None):
     global server_instance
     VaporRequestHandler.api_key = api_key
     server_instance = VaporHTTPServer((host, port), VaporRequestHandler)
 
-    def handle_signal(sig, frame):
-        sys.stderr.write("\n\033[33m[VaporRAM] Server stopped via terminal (CTRL+C).\033[0m\n")
-        try:
-            server_instance.server_close()
-        except Exception:
-            pass
-        os._exit(0)
-
-    if threading.current_thread() is threading.main_thread():
-        try:
-            signal.signal(signal.SIGINT, handle_signal)
-            signal.signal(signal.SIGTERM, handle_signal)
-        except Exception:
-            pass
-
     read_model_architecture(current_model_path)
     gguf = find_gguf(current_model_path)
 
     print("\033[1;36m")
-    print(f"  💨 VaporRAM Web Engine v{VERSION}")
-    print(f"  \033[32m➜\033[1;36m  Local Dashboard : \033[1;37mhttp://localhost:{port}/\033[1;36m")
-    print(f"  \033[32m➜\033[1;36m  API Endpoint    : \033[1;37mhttp://localhost:{port}/v1\033[1;36m")
-    print(f"  \033[32m➜\033[1;36m  Model Target    : \033[1;33m{MODEL_ID}\033[1;36m")
+    print(f"  \U0001f4a8 VaporRAM Web Engine v{VERSION}")
+    print(f"  \033[32m\u279c\033[1;36m  Local Dashboard : \033[1;37mhttp://localhost:{port}/\033[1;36m")
+    print(f"  \033[32m\u279c\033[1;36m  API Endpoint    : \033[1;37mhttp://localhost:{port}/v1\033[1;36m")
+    print(f"  \033[32m\u279c\033[1;36m  Model Target    : \033[1;33m{MODEL_ID}\033[1;36m")
     if gguf:
         size_gb = os.path.getsize(gguf) / (1024 ** 3)
-        print(f"  \033[32m➜\033[1;36m  Weights         : \033[1;37m{os.path.basename(gguf)} \033[90m({size_gb:.2f} GB)\033[1;36m")
+        print(f"  \033[32m\u279c\033[1;36m  Weights         : \033[1;37m{os.path.basename(gguf)} \033[90m({size_gb:.2f} GB)\033[1;36m")
     else:
-        print(f"  \033[33m➜\033[1;36m  Weights         : \033[1;33mnot found in {current_model_path} \033[90m(use the dashboard to download)\033[1;36m")
-    print(f"  \033[32m➜\033[1;36m  Context Window  : \033[1;37m{n_ctx} tokens \033[90m(engine max {SAFE_GGUF_MAX_CONTEXT})\033[1;36m")
-    if api_key:
-        print("  \033[32m➜\033[1;36m  Auth            : \033[1;37mAPI key required\033[1;36m")
-    print("  \033[90m(Press CTRL+C or use Web UI Stop/Restart buttons to control server)\033[0m")
+        print(f"  \033[33m\u279c\033[1;36m  Weights         : \033[1;33mnot found in {current_model_path} \033[90m(use the dashboard to download)\033[1;36m")
+    print(f"  \033[32m\u279c\033[1;36m  Context Window  : \033[1;37m{n_ctx} tokens \033[90m(engine max {SAFE_GGUF_MAX_CONTEXT})\033[1;36m")
+    print("  \033[90m(Press CTRL+C or use the Web UI Stop button to control the server)\033[0m")
     print()
 
-    try:
-        server_instance.serve_forever(poll_interval=0.5)
-    except (KeyboardInterrupt, SystemExit):
-        handle_signal(None, None)
+    _serve_until_signal(server_instance)
+
 
 if __name__ == "__main__":
     serve()
