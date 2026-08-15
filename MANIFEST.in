@@ -1,0 +1,36 @@
+# Source distribution contents.
+#
+# Without this, `python -m build` produced an sdist containing only the loose
+# .py modules — no dashboard, no presets, no C sources — so installing from
+# source yielded a server that 404s its own web UI.
+
+include README.md
+include LICENSE
+include CHANGELOG.md
+include RELEASE_NOTES.md
+include vapor
+include vapor.json
+include vapor.service
+include MANIFEST.in
+
+# Static dashboard export served by openai_server.py
+recursive-include web/dist *
+
+# Persona presets loaded at runtime
+recursive-include presets *.json
+
+# C engine sources and build rules (binary is compiled at install time)
+recursive-include c *.c *.h Makefile
+
+# Helper tooling referenced by the CLI
+recursive-include tools *.py *.c
+
+recursive-include tests *.py
+
+# Never ship build noise
+prune web/node_modules
+prune web/.next
+prune build
+prune dist_build
+global-exclude *.pyc *.o *.so
+global-exclude .DS_Store

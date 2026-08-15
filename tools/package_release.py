@@ -42,11 +42,29 @@ def create_release():
             shutil.copy(src, build_dir_linux)
             shutil.copy(src, build_dir_macos)
 
-    for dir_name in ["c", "web", "tools", "presets"]:
+    # Runtime only: the dashboard ships as the pre-built static export, so the
+    # Next.js sources and node_modules (~680 MB) stay out of the tarball.
+    ignore_build_junk = shutil.ignore_patterns(
+        "node_modules", ".next", "__pycache__", "*.pyc", "*.o",
+        ".yarn", ".turbo", "*.tsbuildinfo",
+    )
+
+    for dir_name in ["c", "tools", "presets"]:
         src_dir = os.path.join(HERE, dir_name)
         if os.path.exists(src_dir):
-            shutil.copytree(src_dir, os.path.join(build_dir_linux, dir_name))
-            shutil.copytree(src_dir, os.path.join(build_dir_macos, dir_name))
+            shutil.copytree(src_dir, os.path.join(build_dir_linux, dir_name),
+                            ignore=ignore_build_junk)
+            shutil.copytree(src_dir, os.path.join(build_dir_macos, dir_name),
+                            ignore=ignore_build_junk)
+
+    web_dist = os.path.join(HERE, "web", "dist")
+    if os.path.exists(web_dist):
+        for build_dir in (build_dir_linux, build_dir_macos):
+            shutil.copytree(web_dist, os.path.join(build_dir, "web", "dist"),
+                            ignore=ignore_build_junk)
+    else:
+        print("[!] Warning: web/dist not found — run 'yarn --cwd web build' first. "
+              "The packaged dashboard will be missing.")
 
     print("3. Creating release tarball archives for Linux and macOS (.tar.gz)...")
     

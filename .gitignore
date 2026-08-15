@@ -2,8 +2,6 @@ __pycache__/
 *.pyc
 *.o
 *.so
-dist/
-build/
 *.egg-info/
 c/simd_bench
 .DS_Store
@@ -11,6 +9,25 @@ models/
 *.gguf
 *.bin
 *.safetensors
+
+# Python build output at the repo root only.
+# NOTE: these are anchored with a leading slash on purpose. A bare `dist/`
+# also matched web/dist/, which silently excluded the compiled dashboard
+# assets from the repo — releases then shipped an index.html with no JS.
+/dist/
+/build/
+/dist_build/
+
+# Node / Next.js
+node_modules/
+.next/
+.yarn/
+*.tsbuildinfo
+
+# The static dashboard export IS committed: the Python package serves it
+# directly, so it must be present in a clean checkout.
+!web/dist/
+!web/dist/**
 
 # OS distribution archives (attached to GitHub Releases, excluded from git repo)
 vapor-ram-v*.tar.gz
