@@ -60,16 +60,16 @@ jobs:
         run: make -C c
 
       - name: Byte-compile Python sources
-        run: python3 -m compileall -q openai_server.py config.py doctor.py resource_plan.py vapor tools/
+        run: python3 -m compileall -q vapor_ram/ tools/ tests/ vapor
 
       - name: Run integration test suite
         run: python3 tests/test_engine.py
 
       - name: Resource planner sanity check
-        run: python3 resource_plan.py
+        run: python3 -m vapor_ram.resource_plan
 
       - name: Doctor diagnostics
-        run: python3 doctor.py
+        run: python3 -m vapor_ram.doctor
 
   web:
     name: Web dashboard
@@ -162,7 +162,9 @@ jobs:
         run: |
           python -m venv /tmp/verify
           /tmp/verify/bin/pip install --quiet dist/*.whl
-          /tmp/verify/bin/python -c "import version; print('installed version', version.__version__)"
+          /tmp/verify/bin/python -c "import vapor_ram; print('installed version', vapor_ram.__version__)"
+          /tmp/verify/bin/vapor --version
+          /tmp/verify/bin/vapor presets
 
       - name: Report wheel payload
         run: |

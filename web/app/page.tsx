@@ -39,9 +39,25 @@ export default function VaporDashboardPage() {
 	};
 
 	useEffect(() => {
-		checkHealthAndProgress();
-		const interval = setInterval(checkHealthAndProgress, 3000);
-		return () => clearInterval(interval);
+		let cancelled = false;
+		const tick = async () => {
+			const h = await fetchHealth();
+			if (cancelled) return;
+			if (h) {
+				setHealth(h);
+				setIsOnline(true);
+			} else {
+				setIsOnline(false);
+			}
+			const p = await fetchProgress();
+			if (!cancelled && p) setProgress(p);
+		};
+		tick();
+		const interval = setInterval(tick, 3000);
+		return () => {
+			cancelled = true;
+			clearInterval(interval);
+		};
 	}, []);
 
 	const handleClearChat = () => {

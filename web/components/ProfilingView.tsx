@@ -46,10 +46,22 @@ export function ProfilingView() {
 	}, []);
 
 	useEffect(() => {
-		load();
-		const id = setInterval(load, 5000);
-		return () => clearInterval(id);
-	}, [load]);
+		let cancelled = false;
+		const tick = async () => {
+			try {
+				const res = await fetch(`${getBaseUrl()}/v1/stats`, { cache: "no-store" });
+				if (!cancelled) setStats(res.ok ? await res.json() : null);
+			} catch {
+				if (!cancelled) setStats(null);
+			}
+		};
+		tick();
+		const id = setInterval(tick, 5000);
+		return () => {
+			cancelled = true;
+			clearInterval(id);
+		};
+	}, []);
 
 	const t = stats?.timings ?? {};
 	const hasRun = t.completion_tokens != null || t.wall_time_ms != null;

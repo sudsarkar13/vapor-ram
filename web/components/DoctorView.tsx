@@ -40,7 +40,9 @@ const STATUS_STYLES = {
 
 export function DoctorView() {
 	const [report, setReport] = useState<DoctorReport | null>(null);
-	const [loading, setLoading] = useState(false);
+	// Starts true: the first run is kicked off on mount, so the UI is busy from
+	// the first paint rather than flipping a flag inside the effect body.
+	const [loading, setLoading] = useState(true);
 	const [offline, setOffline] = useState(false);
 
 	const runDiagnostics = useCallback(async () => {
@@ -52,8 +54,17 @@ export function DoctorView() {
 	}, []);
 
 	useEffect(() => {
-		runDiagnostics();
-	}, [runDiagnostics]);
+		let cancelled = false;
+		fetchDoctor().then((data) => {
+			if (cancelled) return;
+			setReport(data);
+			setOffline(data === null);
+			setLoading(false);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	return (
 		<div className="h-full bg-slate-950 p-6 overflow-y-auto space-y-6 text-slate-100 font-sans">

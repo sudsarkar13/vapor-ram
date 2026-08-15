@@ -14,10 +14,18 @@ export function BrainView() {
 	}, []);
 
 	useEffect(() => {
-		load();
-		const id = setInterval(load, 5000);
-		return () => clearInterval(id);
-	}, [load]);
+		let cancelled = false;
+		const tick = () =>
+			fetchHealth().then((h) => {
+				if (!cancelled) setHealth(h);
+			});
+		tick();
+		const id = setInterval(tick, 5000);
+		return () => {
+			cancelled = true;
+			clearInterval(id);
+		};
+	}, []);
 
 	const arch = health?.architecture;
 	const layers = arch?.n_layers ?? 0;

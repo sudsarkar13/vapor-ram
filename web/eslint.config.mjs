@@ -12,7 +12,21 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Static export output. It is committed (the Python package serves it
+    // directly) but it is minified build artefact, not source -- linting it
+    // reports thousands of issues in generated code.
+    "dist/**",
   ]),
+  {
+    // components/ui/** is scaffolding emitted by the shadcn CLI and is
+    // regenerated wholesale by `shadcn add`, so local edits there do not
+    // survive. Report its effect-pattern findings as warnings instead of
+    // failing the build on third-party generated code.
+    files: ["components/ui/**"],
+    rules: {
+      "react-hooks/set-state-in-effect": "warn",
+    },
+  },
 ]);
 
 export default eslintConfig;

@@ -128,13 +128,14 @@ export function Sidebar({
 	progress,
 	onRefreshHealth,
 }: SidebarProps) {
-	const [modelDir, setModelDir] = useState("");
-	const [modelDirTouched, setModelDirTouched] = useState(false);
-	const [isDownloading, setIsDownloading] = useState(false);
+	// Server state is the source of truth. Local state holds only a pending edit,
+	// which is preferred until the next poll confirms the server agrees. Deriving
+	// rather than mirroring avoids a setState-in-effect cascade on every 3s poll.
+	const [pendingCtx, setPendingCtx] = useState<number | null>(null);
+	const [pendingCeiling, setPendingCeiling] = useState<number | null>(null);
+	const [modelDirDraft, setModelDirDraft] = useState<string | null>(null);
+	const [downloadRequested, setDownloadRequested] = useState(false);
 	const [presets, setPresets] = useState<VaporPreset[]>([]);
-
-	const [nCtx, setNCtx] = useState<number>(8192);
-	const [ramCeilingGb, setRamCeilingGb] = useState<number>(1.5);
 	const [busy, setBusy] = useState(false);
 	const [statusMsg, setStatusMsg] = useState("");
 	const [statusIsError, setStatusIsError] = useState(false);
@@ -146,6 +147,19 @@ export function Sidebar({
 	const safeMaxCtx = progress?.safe_max_context ?? 16384;
 	const download = progress?.download_progress;
 	const modelState = progress?.model_state;
+
+	// A pending edit wins until the server reports the same value, at which point
+	// the two agree and the server value is used.
+	const serverCtx = progress?.n_ctx ?? 8192;
+	const serverCeiling = progress?.ram_ceiling_gb ?? 1.5;
+	const nCtx = pendingCtx !== null && pendingCtx !== serverCtx ? pendingCtx : serverCtx;
+	const ramCeilingGb =
+		pendingCeiling !== null && pendingCeiling !== serverCeiling
+			? pendingCeiling
+			: serverCeiling;
+	// While the user is editing the field, their draft wins over the polled path.
+	const modelDir = modelDirDraft ?? progress?.model_path ?? "";
+	const modelDirTouched = modelDirDraft !== null;
 
 	// The engine refuses anything above safe_max_context, so don't offer it.
 	const contextOptions = ALL_CONTEXT_OPTIONS.filter((o) => o.value <= safeMaxCtx);
@@ -165,14 +179,6 @@ export function Sidebar({
 		});
 	}, []);
 
-	// Mirror authoritative server state. The model directory only syncs while the
-	// user hasn't started editing it, so typing is never overwritten mid-keystroke.
-	useEffect(() => {
-		if (progress?.n_ctx) setNCtx(progress.n_ctx);
-		if (progress?.ram_ceiling_gb) setRamCeilingGb(progress.ram_ceiling_gb);
-		if (progress?.model_path && !modelDirTouched) setModelDir(progress.model_path);
-	}, [progress?.n_ctx, progress?.ram_ceiling_gb, progress?.model_path, modelDirTouched]);
-
 	const report = (msg: string, isError = false) => {
 		setStatusMsg(msg);
 		setStatusIsError(isError);
@@ -182,13 +188,20 @@ export function Sidebar({
 		async (params: { n_ctx?: number; ram_ceiling_gb?: number }) => {
 			setBusy(true);
 			report("Applying settings…");
+			if (params.n_ctx !== undefined) setPendingCtx(params.n_ctx);
+			if (params.ram_ceiling_gb !== undefined) setPendingCeiling(params.ram_ceiling_gb);
 			// model_dir is deliberately omitted: it has its own explicit action, so
 			// changing the context window can never overwrite the active model path.
 			const res = await updateServerConfig(params);
 			setBusy(false);
-			if (!res) return report("Server unreachable — settings not applied.", true);
-			if (res.n_ctx) setNCtx(res.n_ctx);
-			if (res.ram_ceiling_gb) setRamCeilingGb(res.ram_ceiling_gb);
+			if (!res) {
+				// Roll the optimistic value back; the server never took it.
+				setPendingCtx(null);
+				setPendingCeiling(null);
+				return report("Server unreachable — settings not applied.", true);
+			}
+			if (res.n_ctx !== undefined) setPendingCtx(res.n_ctx);
+			if (res.ram_ceiling_gb !== undefined) setPendingCeiling(res.ram_ceiling_gb);
 			report(res.message || "Settings saved to vapor.json.", !!res.warnings?.length);
 			onRefreshHealth();
 		},
@@ -200,29 +213,24 @@ export function Sidebar({
 		report("Validating model directory…");
 		const res = await setModelPath(modelDir);
 		setBusy(false);
-		setModelDirTouched(false);
 		if (!res) return report("Server unreachable.", true);
+		// Drop the draft so the field follows the server again.
+		if (!res.error) setModelDirDraft(null);
 		report(res.message || "Model directory updated.", !!res.error);
 		onRefreshHealth();
 	};
 
 	const startDownload = async () => {
-		setIsDownloading(true);
+		setDownloadRequested(true);
 		report("Requesting GGUF download…");
 		const res = await downloadModel(undefined, modelDir || undefined);
 		if (!res) {
-			setIsDownloading(false);
+			setDownloadRequested(false);
 			return report("Could not start download.", true);
 		}
 		report(res.message || "Download started.");
 		onRefreshHealth();
 	};
-
-	// The button stays in its downloading state until the server says otherwise,
-	// rather than resetting the moment the POST returns.
-	useEffect(() => {
-		if (download && download.status !== "downloading") setIsDownloading(false);
-	}, [download?.status]);
 
 	const handleStop = async () => {
 		if (confirm("Stop the VaporRAM engine server?")) {
@@ -232,7 +240,11 @@ export function Sidebar({
 	};
 
 	const mem = projectMemory(nCtx, ramCeilingGb, measuredRssMb, arch);
-	const downloadActive = download?.status === "downloading" || isDownloading;
+	// Show the downloading state from the moment the user clicks until the server
+	// reports a terminal status, without mirroring server state into local state.
+	const downloadActive =
+		download?.status === "downloading" ||
+		(downloadRequested && (!download || download.status === "idle"));
 	const ramUsedPct = measuredRssMb
 		? Math.min(100, (measuredRssMb / (totalHostRamGb * 1024)) * 100)
 		: 0;
@@ -433,8 +445,7 @@ export function Sidebar({
 				<Input
 					value={modelDir}
 					onChange={(e) => {
-						setModelDir(e.target.value);
-						setModelDirTouched(true);
+						setModelDirDraft(e.target.value);
 					}}
 					placeholder="./models/gemma-4-E4B-it"
 					className="bg-slate-950 border-slate-700 text-slate-200 font-mono text-[11px] focus:border-cyan-500"
@@ -459,8 +470,7 @@ export function Sidebar({
 								<button
 									key={m.path}
 									onClick={() => {
-										setModelDir(m.path);
-										setModelDirTouched(true);
+										setModelDirDraft(m.path);
 									}}
 									className={`w-full text-left px-2 py-1.5 rounded-md border text-[10px] font-mono transition-colors ${
 										m.is_active
