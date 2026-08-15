@@ -4,7 +4,7 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [v1.0.7-alpha.4] - 2026-08-15
 
 ### 🐛 Fixed Bugs & Issues
 - **Dashboard/API contract mismatch**: `/health` returns `model` and `ram_ceiling_gb`, but the client declared `active_model` and `ram_ceiling`. The Doctor tab rendered literal `undefined`; the header masked the same bug behind a hardcoded fallback.
@@ -34,6 +34,19 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 - **CLI parity**: `vapor chat` keeps conversation history, streams tokens, applies presets, and `/stats` reports measured values.
 - **CI/CD overhaul**: matrix CI across Linux/macOS and Python 3.9/3.12; version-consistency gate across all eight manifests (`tools/check_version.py`); stale-`web/dist` detection; sdist completeness gate; tag-driven release pipeline with automatic Stable/Beta/Alpha/RC channel handling, native per-platform tarballs, OIDC PyPI publishing with PEP 740 attestations, and Stable-only docs sync.
 - **Test suite**: expanded from 4 smoke assertions to 45 contract checks covering telemetry shape, context honesty, model-directory isolation, preset resolution, concurrency, and the weightless failure mode.
+
+
+### 📦 Packaging (breaking layout change)
+- **`pip install vapor-ram` was completely non-functional and is now fixed.** The console entry point was declared as `vapor:main`, but `vapor` was a bare script with no `.py` extension and therefore not importable — the installed command failed instantly with `ModuleNotFoundError: No module named 'vapor'`. The wheel also contained only 12 files: no dashboard, no presets, no C engine, no tools.
+- **Modules moved into a `vapor_ram/` package**: `openai_server.py`, `config.py`, `doctor.py`, `resource_plan.py`, `version.py` and the CLI now live under `vapor_ram/`. This makes `package_data` work and stops the project from installing generic top-level modules named `config`, `version` and `doctor` into site-packages, where they could shadow other packages.
+- **Runtime assets are staged into the package at build time** (`setup.py: build_py`), so the wheel ships the dashboard, presets, helper tools and the compiled engine — 92 entries, verified to serve a working UI from a clean install.
+- **`vapor_ram/paths.py`** resolves assets for both a git checkout and an installed package. Installed runs now default weights to `~/.vapor-ram/models/` and config to `~/.vapor-ram/vapor.json` instead of attempting to write gigabytes into site-packages.
+- `./vapor` remains the development launcher and delegates to `vapor_ram.cli`.
+- Added `vapor --version`.
+
+### 📝 Documentation accuracy
+- **Corrected unverified performance claims.** The README, badges and documentation site advertised a measured peak RSS of **142.3 MB**, a **7.70x** SIMD speedup and **204,795 GFLOPS**. None were measured: they were hardcoded constants in the API responses. Measured RSS with Q4_K_M weights is approximately **6 GB**.
+- The README now states plainly that generation runs through llama.cpp (which memory-maps the full GGUF), that the C layer streamer is built but not yet wired into the token path, and that the 1.5 GB ceiling is a design target that is **not yet met**. The RAM badge reads "target", and an alpha status badge was added.
 
 ---
 

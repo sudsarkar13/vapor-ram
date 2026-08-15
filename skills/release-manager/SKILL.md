@@ -43,7 +43,9 @@ python3 tools/check_version.py --set 1.0.7-beta.1
 python3 tools/check_version.py            # verify they now agree
 ```
 
-Covered files: `version.py`, `setup.py`, `pyproject.toml`, `openai_server.py`,
+Covered files: `vapor_ram/version.py`, `setup.py`, `pyproject.toml`,
+`vapor_ram/openai_server.py`, `c/vapor_engine.c`, `tools/package_release.py`,
+`tools/download_model.py`. The CLI banner reads `__version__`, so it needs no bump.
 `vapor`, `c/vapor_engine.c`, `tools/package_release.py`, `tools/download_model.py`.
 
 ### 2. Rebuild the dashboard and the C engine
@@ -158,11 +160,19 @@ GitHub Release needs repairing.
 
 ---
 
-## ⚠️ Known packaging gap
+## 📦 Packaging notes
 
-The **sdist is complete** (dashboard, presets, C sources — enforced by CI), but the
-**wheel carries only the loose `.py` modules**. `package_data` cannot attach assets
-because the flat layout declares no Python package. Until the modules move into a
-`vapor_ram/` package directory, `pip install vapor-ram` gives a CLI that cannot serve
-its own web UI. CI emits a warning on every build so this stays visible.
-Prefer the standalone tarballs or a source install until it is resolved.
+Python modules live in `vapor_ram/`. Runtime assets (dashboard, presets, tools,
+compiled engine) live at the repository root and are staged into the package at
+build time by `setup.py`'s `build_py` override — they are **not** committed under
+`vapor_ram/` and are gitignored there.
+
+Both the sdist and the wheel are gated in CI for completeness. After any change
+to the packaging, verify a real install rather than trusting the build log:
+
+```bash
+python -m build --wheel
+pip install --force-reinstall dist/*.whl
+vapor --version && vapor presets      # must list the disk-defined personas
+vapor serve --port 8901 &             # then curl the dashboard and a JS chunk
+```
