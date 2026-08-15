@@ -383,15 +383,15 @@ footer .flinks a:hover { color: var(--cyan); }
   <div class="status-grid">
     <div class="status-card">
       <div class="label">Target RAM Ceiling</div>
-      <div class="value" style="color:var(--emerald);">&lt; 1.5 GB</div>
+      <div class="value" style="color:var(--emerald);">1.5 GB (target)</div>
     </div>
     <div class="status-card">
-      <div class="label">Measured Peak RSS</div>
-      <div class="value" style="color:var(--cyan);">142.32 MB</div>
+      <div class="label">Actual RSS (alpha)</div>
+      <div class="value" style="color:var(--amber, #fbbf24);">~6 GB</div>
     </div>
     <div class="status-card">
       <div class="label">AVX2 GEMV Core</div>
-      <div class="value" style="color:var(--indigo);">204.7 GFLOPS</div>
+      <div class="value" style="color:var(--indigo);">./vapor bench</div>
     </div>
     <div class="status-card">
       <div class="label">RAM Budget Usage</div>
@@ -419,7 +419,7 @@ footer .flinks a:hover { color: var(--cyan); }
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
       </div>
       <h3>AVX2 SIMD Accelerators</h3>
-      <p>Hand-crafted FMA3 matrix-vector kernels multi-threaded with OpenMP to achieve <strong style="color:var(--emerald);">7.70x speedup</strong> over scalar CPU computation.</p>
+      <p>Hand-crafted FMA3 matrix-vector kernels multi-threaded with OpenMP for the C streaming engine. Measure the speedup on your own hardware with <code>./vapor bench</code>.</p>
     </div>
 
     <div class="card-glass">

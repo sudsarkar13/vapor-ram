@@ -1,23 +1,28 @@
 # VaporRAM 💨
 
-**VaporRAM** is a lightweight, zero-dependency inference engine written in **pure C**. It is specifically engineered to run **google/gemma-4-E4B-it (8-billion parameter state-of-the-art model)** on consumer hardware under a strict **1.5 GB RAM ceiling** by streaming layers directly from NVMe SSD storage into RAM.
+**VaporRAM** is a local inference server, CLI and web dashboard for **google/gemma-4-E4B-it**, packaged for consumer hardware.
+
+Its goal is to run the model under a **1.5 GB RAM ceiling** by streaming transformer layers directly from NVMe SSD storage. That streaming engine — unbuffered `O_DIRECT` reads with kernel prefetch hints and an int8 quantised KV cache — is implemented in pure C under [`c/`](c/).
+
+> **Current status (alpha):** token generation runs through **llama.cpp**, which memory-maps the full GGUF file. The C layer streamer is built but not yet wired into the token path, so the RAM ceiling is **not yet achieved** — measured RSS with the Q4_K_M weights is roughly **6 GB**. The dashboard reports real measured RSS, so you can see this for yourself. Connecting the streaming engine to generation is the primary remaining work.
 
 [![PyPI version](https://img.shields.io/pypi/v/vapor-ram.svg)](https://pypi.org/project/vapor-ram/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/vapor-ram?color=06b6d4&style=flat-square)](https://pypi.org/project/vapor-ram/)
 [![Docs](https://img.shields.io/badge/Docs-Live-cyan.svg)](https://sudsarkar13.github.io/vapor-ram/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![RAM Ceiling](https://img.shields.io/badge/RAM_Ceiling-%3C_1.5_GB-brightgreen.svg)](#hardware--system-requirements)
+[![RAM Ceiling](https://img.shields.io/badge/RAM_Ceiling-target_1.5_GB-yellow.svg)](#hardware--system-requirements)
+[![Status](https://img.shields.io/badge/Status-alpha-orange.svg)](CHANGELOG.md)
 [![CI Pipeline](https://img.shields.io/badge/CI-Passing-success.svg)](.github/workflows/ci.yml)
 
 ---
 
 ## Key Features
 
-- **Extreme Hardware Accessibility**: Run an 8B parameter model under a strict **1.5 GB RAM ceiling** (measured peak RSS: **142.3 MB**).
+- **Live Memory Telemetry**: The dashboard and `/v1/stats` report the engine's **actual measured RSS**, host RAM and KV-cache projections — no estimated or placeholder figures.
 - **Cross-Platform Engine**: Full native support for **Linux** (x86_64) and **macOS MacBooks** (Apple Silicon M1/M2/M3/M4 & Intel).
 - **Sequential Layer Pipeline (SLP)**: Zero-copy unbuffered `O_DIRECT` NVMe SSD layer streaming with asynchronous POSIX kernel prefetching hints (`POSIX_FADV_WILLNEED`).
-- **AVX2 SIMD & ARM NEON Acceleration**: Tailored matrix-vector kernels achieving **7.70x speedup** over scalar loops (204,795 GFLOPS).
-- **int8 Quantized KV Cache**: Compresses Key & Value attention states with per-token scale factors, keeping context memory overhead < 250 MB.
+- **AVX2 SIMD & ARM NEON Kernels**: Hand-written matrix-vector kernels in the C engine, with an OpenMP build (`make -C c`). Benchmark them on your own hardware with `./vapor bench`.
+- **int8 Quantized KV Cache**: Compresses Key & Value attention states with per-token scale factors (implemented in [`c/kv_cache.c`](c/kv_cache.c); used by the C engine path).
 - **OpenAI-Compatible API**: Built-in HTTP server supporting `/v1/chat/completions`, `/v1/responses`, `/v1/models`, and `/health`.
 - **Web UI & Interactive CLI**: Includes an interactive terminal chat mode (`vapor chat`) and a web dashboard (`vapor web`).
 
@@ -27,11 +32,11 @@
 
 | Resource | Minimum Requirement | Recommended |
 | :--- | :--- | :--- |
-| **RAM Ceiling** | **< 1.5 GB** | **< 1.5 GB** |
-| **Active Peak RSS** | **142.3 MB** | **142.3 MB** |
+| **RAM Ceiling** | design target: **1.5 GB** (not yet met — see status above) | — |
+| **Actual RSS today** | ~**6 GB** with Q4_K_M weights via llama.cpp | 8 GB+ system RAM |
 | **Storage** | 18 GB NVMe SSD | PCIe Gen3 / Gen4 NVMe SSD |
 | **Supported OS** | **Linux** (x86_64, WSL2), **macOS** (MacBooks M1–M4 & Intel) | Linux (x86_64), macOS (Apple Silicon) |
-| **Build Tools** | `gcc` / `clang` / Apple Clang, `make`, Python 3.8+ | GCC 11+ / Apple Clang with OpenMP |
+| **Build Tools** | `gcc` / `clang` / Apple Clang, `make`, Python 3.9+ | GCC 11+ / Apple Clang with OpenMP |
 
 ---
 
