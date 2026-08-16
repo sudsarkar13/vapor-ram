@@ -6,9 +6,36 @@
  * covers /health, /v1/models, /v1/system/config, /v1/system/progress and /v1/stats.
  */
 
+/** One part of a multimodal message, matching OpenAI's content-part shape.
+ *  The server maps each media part onto the model's own control token. */
+export type ContentPart =
+	| { type: "text"; text: string }
+	| { type: "image_url"; image_url: { url: string } };
+
 export interface VaporMessage {
 	role: "system" | "user" | "assistant";
-	content: string;
+	/** A plain string, or an array of parts when the message carries media. */
+	content: string | ContentPart[];
+}
+
+/** The readable text of a message, whichever shape its content takes.
+ *  Rendering `content` directly would print "[object Object]" for a message
+ *  that carries an image. */
+export function messageText(content: VaporMessage["content"]): string {
+	if (typeof content === "string") return content;
+	return content
+		.filter((p): p is Extract<ContentPart, { type: "text" }> => p.type === "text")
+		.map((p) => p.text)
+		.join("\n");
+}
+
+/** Data URLs of every image attached to a message, in order. */
+export function messageImages(content: VaporMessage["content"]): string[] {
+	if (typeof content === "string") return [];
+	return content
+		.filter((p): p is Extract<ContentPart, { type: "image_url" }> =>
+			p.type === "image_url")
+		.map((p) => p.image_url.url);
 }
 
 export interface VaporSlots {
@@ -70,6 +97,13 @@ export interface Telemetry {
 	slots: VaporSlots;
 }
 
+export interface MultimodalCapability {
+	/** True only when a projector is installed AND the runtime can use it. */
+	ready: boolean;
+	projector: string | null;
+	accepts: string[];
+}
+
 export interface VaporHealth extends Telemetry {
 	status: string;
 	engine: string;
@@ -79,6 +113,7 @@ export interface VaporHealth extends Telemetry {
 	format: string;
 	gguf_file: string | null;
 	connection: "CONNECTED" | "NO_WEIGHTS";
+	multimodal?: MultimodalCapability;
 }
 
 export interface DownloadProgress {

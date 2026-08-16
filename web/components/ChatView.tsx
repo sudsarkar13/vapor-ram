@@ -15,11 +15,19 @@ import {
 	Terminal,
 	Loader2,
 	AlertTriangle,
+	ImagePlus,
+	X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThinkingBlock } from "@/components/ThinkingBlock";
 import { Textarea } from "@/components/ui/textarea";
-import { VaporMessage, ModelState } from "@/lib/api";
+import {
+	VaporMessage,
+	ModelState,
+	ContentPart,
+	messageText,
+	messageImages,
+} from "@/lib/api";
 import {
 	subscribe as subscribeGeneration,
 	getSnapshot as generationSnapshot,
@@ -37,6 +45,19 @@ interface ChatViewProps {
 	preset: string;
 	modelState?: ModelState;
 	modelAvailable?: boolean;
+	/** Undefined while health is still loading. */
+	multimodalReady?: boolean;
+}
+
+// Images are inlined as data URLs in the request body, so a large photo costs
+// context as well as bandwidth. This keeps a stray 12 MP camera file from
+// filling the KV cache.
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+interface Attachment {
+	id: string;
+	name: string;
+	dataUrl: string;
 }
 
 // Three bouncing dots, staggered so they read as a wave.
@@ -66,9 +87,13 @@ export function ChatView({
 	preset,
 	modelState,
 	modelAvailable = true,
+	multimodalReady,
 }: ChatViewProps) {
 	const [input, setInput] = useState("");
 	const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+	const [attachments, setAttachments] = useState<Attachment[]>([]);
+	const [attachError, setAttachError] = useState<string | null>(null);
+	const fileInputRef = useRef<HTMLInputElement | null>(null);
 
 	// Generation lives outside React, so switching tabs mid-reply no longer
 	// discards the stop button, the abort handle or the timings.
@@ -113,16 +138,76 @@ export function ChatView({
 	const isStreamingAssistant = (idx: number) =>
 		isGenerating && idx === lastAssistantIndex;
 
+	const addFiles = (files: FileList | File[] | null) => {
+		if (!files) return;
+		setAttachError(null);
+		for (const file of Array.from(files)) {
+			if (!file.type.startsWith("image/")) {
+				setAttachError(`${file.name} is not an image.`);
+				continue;
+			}
+			if (file.size > MAX_IMAGE_BYTES) {
+				setAttachError(
+					`${file.name} is ${(file.size / 1024 / 1024).toFixed(1)} MB. Images must be under ${MAX_IMAGE_BYTES / 1024 / 1024} MB.`,
+				);
+				continue;
+			}
+			const reader = new FileReader();
+			reader.onload = () => {
+				const dataUrl = String(reader.result || "");
+				if (!dataUrl) return;
+				setAttachments((prev) => [
+					...prev,
+					{
+						id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
+						name: file.name,
+						dataUrl,
+					},
+				]);
+			};
+			reader.onerror = () => setAttachError(`Could not read ${file.name}.`);
+			reader.readAsDataURL(file);
+		}
+	};
+
+	const removeAttachment = (id: string) =>
+		setAttachments((prev) => prev.filter((a) => a.id !== id));
+
+	// Pasting a screenshot is the fastest way to ask about one.
+	const handlePaste = (e: React.ClipboardEvent) => {
+		if (!multimodalReady) return;
+		const files = Array.from(e.clipboardData.files || []);
+		if (files.length) {
+			e.preventDefault();
+			addFiles(files);
+		}
+	};
+
 	const handleSend = async (textToSend?: string) => {
 		const query = (textToSend || input).trim();
-		if (!query || isGenerating) return;
+		// An image on its own is a valid question; text is only required when
+		// nothing is attached.
+		if ((!query && attachments.length === 0) || isGenerating) return;
+
+		const content: VaporMessage["content"] =
+			attachments.length === 0
+				? query
+				: ([
+						...(query ? [{ type: "text", text: query }] : []),
+						...attachments.map((a) => ({
+							type: "image_url" as const,
+							image_url: { url: a.dataUrl },
+						})),
+					] as ContentPart[]);
 
 		const updatedMessages: VaporMessage[] = [
 			...messages,
-			{ role: "user", content: query },
+			{ role: "user", content },
 		];
 		setMessages(updatedMessages);
 		if (!textToSend) setInput("");
+		setAttachments([]);
+		setAttachError(null);
 
 		await startGeneration(updatedMessages, preset, setMessages);
 	};
@@ -232,8 +317,27 @@ export function ChatView({
 								) : null}
 
 								{msg.role === "user" ?
-									<p className="whitespace-pre-wrap">{msg.content}</p>
-								: isStreamingAssistant(idx) && !msg.content ?
+									<div className="space-y-2">
+										{messageImages(msg.content).length > 0 && (
+											<div className="flex flex-wrap gap-2">
+												{messageImages(msg.content).map((src, i) => (
+													/* eslint-disable-next-line @next/next/no-img-element */
+													<img
+														key={i}
+														src={src}
+														alt={`Attachment ${i + 1}`}
+														className="max-h-40 rounded-lg border border-cyan-500/30 object-contain bg-slate-950"
+													/>
+												))}
+											</div>
+										)}
+										{messageText(msg.content) && (
+											<p className="whitespace-pre-wrap">
+												{messageText(msg.content)}
+											</p>
+										)}
+									</div>
+								: isStreamingAssistant(idx) && !messageText(msg.content) ?
 									// While reasoning streams the block above already shows
 									// activity, so don't also show the generic typing dots.
 									generation.isThinking && generation.streamingIndex === idx ?
@@ -243,21 +347,21 @@ export function ChatView({
 											message={modelState?.message || "Loading model weights…"}
 										/>
 									:	<TypingDots />
-								: msg.content ?
+								: messageText(msg.content) ?
 									<div className="prose prose-invert prose-sm max-w-none prose-headings:text-cyan-300 prose-headings:font-bold prose-a:text-cyan-400 prose-code:text-cyan-300 prose-code:bg-slate-950 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-pre:bg-slate-950 prose-pre:border prose-pre:border-slate-800">
 										<ReactMarkdown
 											remarkPlugins={[remarkGfm]}
 											rehypePlugins={[rehypeHighlight]}>
-											{msg.content}
+											{messageText(msg.content)}
 										</ReactMarkdown>
 									</div>
 								:	null}
 
 								{msg.role === "assistant" &&
-									msg.content &&
+									messageText(msg.content) &&
 									!isStreamingAssistant(idx) && (
 										<button
-											onClick={() => copyToClipboard(msg.content, idx)}
+											onClick={() => copyToClipboard(messageText(msg.content), idx)}
 											className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg bg-slate-950/80 border border-slate-800 text-slate-400 hover:text-cyan-300 transition-all"
 											title="Copy message">
 											{copiedIndex === idx ?
@@ -305,9 +409,41 @@ export function ChatView({
 						</div>
 					)}
 
+					{attachments.length > 0 && (
+						<div className="flex flex-wrap gap-2 mb-2">
+							{attachments.map((a) => (
+								<div
+									key={a.id}
+									className="relative group rounded-lg border border-slate-700 bg-slate-900 overflow-hidden">
+									{/* eslint-disable-next-line @next/next/no-img-element */}
+									<img
+										src={a.dataUrl}
+										alt={a.name}
+										className="h-16 w-16 object-cover"
+									/>
+									<button
+										type="button"
+										onClick={() => removeAttachment(a.id)}
+										aria-label={`Remove ${a.name}`}
+										className="absolute top-0.5 right-0.5 h-5 w-5 rounded-full bg-slate-950/85 text-slate-300 flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:ring-2 focus-visible:ring-cyan-400 transition-opacity">
+										<X className="h-3 w-3" />
+									</button>
+								</div>
+							))}
+						</div>
+					)}
+
+					{attachError && (
+						<div className="flex items-start gap-2 mb-2 text-[11px] text-amber-400">
+							<AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-px" />
+							<span>{attachError}</span>
+						</div>
+					)}
+
 					<div
+						onPaste={handlePaste}
 						className={`relative flex items-end gap-2 rounded-xl border bg-slate-900/80 pl-3 pr-2 py-2 transition-colors ${
-							input.trim() ?
+							input.trim() || attachments.length > 0 ?
 								"border-cyan-500/50 shadow-[0_0_0_3px_rgba(6,182,212,0.08)]"
 							:	"border-slate-800 focus-within:border-cyan-500/40 focus-within:shadow-[0_0_0_3px_rgba(6,182,212,0.06)]"
 						}`}>
@@ -330,6 +466,37 @@ export function ChatView({
 						/>
 
 						<div className="flex items-center gap-1.5 mb-1 shrink-0">
+							<input
+								ref={fileInputRef}
+								type="file"
+								accept="image/*"
+								multiple
+								className="hidden"
+								onChange={(e) => {
+									addFiles(e.target.files);
+									e.target.value = "";
+								}}
+							/>
+							<Button
+								type="button"
+								size="icon"
+								variant="ghost"
+								disabled={!multimodalReady || isGenerating}
+								onClick={() => fileInputRef.current?.click()}
+								aria-label={
+									multimodalReady
+										? "Attach an image"
+										: "Image input needs the multimodal projector"
+								}
+								title={
+									multimodalReady
+										? "Attach an image (or paste one)"
+										: "Install the projector to send images:  vapor download --mmproj"
+								}
+								className="h-8 w-8 text-slate-400 hover:text-cyan-300 hover:bg-slate-800 disabled:opacity-35">
+								<ImagePlus className="h-4 w-4" />
+							</Button>
+
 							{input.length >= COUNTER_WARN_AT && (
 								<span
 									className={`text-[10px] font-mono tabular-nums ${
@@ -352,11 +519,13 @@ export function ChatView({
 								</Button>
 							:	<Button
 									onClick={() => handleSend()}
-									disabled={!input.trim()}
+									disabled={!input.trim() && attachments.length === 0}
 									size="sm"
 									className="h-8 px-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-md shadow-cyan-500/20 disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none"
 									title={
-										input.trim() ? "Send message" : "Type a message to send"
+										input.trim() || attachments.length > 0
+											? "Send message"
+											: "Type a message or attach an image to send"
 									}>
 									<Send className="h-3.5 w-3.5" />
 									Send

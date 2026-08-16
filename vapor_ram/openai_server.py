@@ -582,6 +582,12 @@ def find_gguf(path):
     return paths.find_model_gguf(path)
 
 
+# Set false by --no-mmproj to leave an installed projector unused. Declared
+# here because multimodal_ready() below reads it, and a flag defined after its
+# reader is only correct by accident of call ordering.
+MMPROJ_ENABLED = True
+
+
 def mmproj_path():
     """Path to the multimodal projector, or None when it is not installed."""
     gguf = find_gguf(current_model_path)
@@ -592,10 +598,13 @@ def mmproj_path():
 def multimodal_ready():
     """True when media input can actually be processed.
 
-    Needs both halves: a projector file on disk, and a runtime that can use it.
-    Reporting readiness on the file alone would let a request through to a
-    library that cannot honour it.
+    Needs all three: the operator has not opted out, a projector file is on
+    disk, and the runtime can use it. Reporting readiness on the file alone
+    let --no-mmproj advertise a capability the server would then refuse -- the
+    dashboard enabled its attach button and the request failed at generation.
     """
+    if not MMPROJ_ENABLED:
+        return False
     if not mmproj_path():
         return False
     try:
@@ -1085,10 +1094,6 @@ def build_prompt(messages, preset, enable_thinking=None, effort=None):
         prefix += f"{TURN_CLOSE}\n"
 
     return prefix + "".join(rendered) + f"{TURN_OPEN}model\n"
-
-
-# Set false by --no-mmproj to leave the projector on disk unused.
-MMPROJ_ENABLED = True
 
 
 def build_chat_handler():

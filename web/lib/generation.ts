@@ -116,9 +116,13 @@ export async function startGeneration(
 				const next = [...prev];
 				const current = next[assistantIndex];
 				if (current) {
+					// Assistant messages are always plain text; only user messages
+					// can carry content parts.
+					const existing =
+						typeof current.content === "string" ? current.content : "";
 					next[assistantIndex] = {
 						...current,
-						content: current.content + chunk,
+						content: existing + chunk,
 					};
 				}
 				return next;

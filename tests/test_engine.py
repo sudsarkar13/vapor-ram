@@ -994,6 +994,12 @@ def test_multimodal_intake(port):
         s.MMPROJ_ENABLED = False
         check("--no-mmproj leaves the projector unused",
               s.build_chat_handler() is None, "handler built despite opt-out")
+        # The capability report must follow the opt-out. When it did not, the
+        # dashboard enabled its attach button under --no-mmproj and the request
+        # failed at generation instead of being refused up front.
+        check("--no-mmproj is reflected in the capability report",
+              s.multimodal_ready() is False,
+              "server would advertise a capability it will refuse")
     finally:
         s.MMPROJ_ENABLED = original
 
