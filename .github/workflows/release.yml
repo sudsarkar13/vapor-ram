@@ -343,8 +343,18 @@ jobs:
           print-hash: true
 
   # ---------------------------------------------------------------------------
-  # Keep the GitHub Pages docs pointing at the newest stable release.
-  # Prereleases deliberately do not move the docs.
+  # Keep the GitHub Pages docs pointing at the newest STABLE release.
+  #
+  # This job is gated on `channel == 'stable'`, and that gate is the mechanism
+  # behind a deliberate rule: the site's own version badge only ever names a
+  # stable release. Publishing an alpha or beta must never change what the
+  # pages advertise.
+  #
+  # It is not a restriction on users. Both docs/releases.html and
+  # docs/changelog.html read the GitHub API live and list every release,
+  # prereleases included, with a filter to show them; anyone who wants an
+  # untested build can take it. The rule governs what the site *advertises*,
+  # not what it *offers*.
   # ---------------------------------------------------------------------------
   docs:
     name: Sync documentation
@@ -373,23 +383,38 @@ jobs:
           python3 - "$TAG" <<'PYEOF'
           import re, sys, pathlib
           tag = sys.argv[1]
-          page = pathlib.Path("docs/index.html")
-          html = page.read_text(encoding="utf-8")
-          html, n = re.subn(r"<!--VERSION-->.*?<!--/VERSION-->",
-                            f"<!--VERSION-->{tag}<!--/VERSION-->", html, flags=re.S)
-          html = re.sub(r"releases/tag/v[0-9]+\.[0-9]+\.[0-9]+(?:-[a-z]+\.[0-9]+)?",
-                        f"releases/tag/{tag}", html)
-          page.write_text(html, encoding="utf-8")
-          print(f"replaced {n} version marker(s) with {tag}")
-          if n == 0:
-              sys.exit("::error::no <!--VERSION--> markers found in docs/index.html")
+          # Every page carries the badge, so every page is updated. The nav tag
+          # on releases.html and changelog.html was hard-coded and drifted three
+          # versions behind index.html before it was single-sourced here.
+          pages = ["docs/index.html", "docs/releases.html", "docs/changelog.html"]
+          total = 0
+          for name in pages:
+              page = pathlib.Path(name)
+              html = page.read_text(encoding="utf-8")
+              html, n = re.subn(r"<!--VERSION-->.*?<!--/VERSION-->",
+                                f"<!--VERSION-->{tag}<!--/VERSION-->", html, flags=re.S)
+              html = re.sub(r"releases/tag/v[0-9]+\.[0-9]+\.[0-9]+(?:-[a-z]+\.[0-9]+)?",
+                            f"releases/tag/{tag}", html)
+              page.write_text(html, encoding="utf-8")
+              print(f"{name}: replaced {n} version marker(s) with {tag}")
+              if n == 0:
+                  sys.exit(f"::error::no <!--VERSION--> markers found in {name}")
+              total += n
+          print(f"total markers updated: {total}")
           PYEOF
 
-          # Fail loudly if any stale version string survives anywhere on the page.
-          if grep -oE "v1\.[0-9]+\.[0-9]+(-[a-z]+\.[0-9]+)?" docs/index.html | grep -v "^${TAG}$"; then
-            echo "::error::docs/index.html still references a version other than ${TAG}"
-            exit 1
-          fi
+          # Fail loudly if any stale version string survives on any page. The
+          # pages must name the stable release and nothing else -- a literal
+          # alpha or beta string anywhere in the markup means the site is
+          # advertising a prerelease.
+          FAILED=0
+          for page in docs/index.html docs/releases.html docs/changelog.html; do
+            if grep -oE "v1\.[0-9]+\.[0-9]+(-[a-z]+\.[0-9]+)?" "$page" | grep -v "^${TAG}$"; then
+              echo "::error::$page still references a version other than ${TAG}"
+              FAILED=1
+            fi
+          done
+          [ "$FAILED" -eq 0 ] || exit 1
           git diff --stat
 
       - name: Commit if changed

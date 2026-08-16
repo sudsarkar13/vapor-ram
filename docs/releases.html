@@ -305,7 +305,7 @@ footer .flinks a:hover { color: var(--cyan); }
 <nav>
   <div class="in">
     <a href="index.html" class="brand">
-      <span style="font-size:1.4rem;line-height:1;display:inline-block;-webkit-text-fill-color:initial;">💨</span> VaporRAM <span id="nav-vtag" class="vtag">v1.0.6</span>
+      <span style="font-size:1.4rem;line-height:1;display:inline-block;-webkit-text-fill-color:initial;">💨</span> VaporRAM <span id="nav-vtag" class="vtag"><!--VERSION-->v1.0.7<!--/VERSION--></span>
     </a>
     <div class="nl">
       <a href="index.html#features">Architecture</a>
@@ -321,13 +321,28 @@ footer .flinks a:hover { color: var(--cyan); }
 <!-- Page Header -->
 <div class="page-header wrap">
   <h1 class="page-title">Release Channels &amp; Downloads</h1>
-  <p class="page-sub">Live GitHub distribution releases. Stable releases are recommended for general production use.</p>
+  <p class="page-sub">Every release ever published, read live from GitHub. Stable is
+  what the site advertises and what we recommend for general use &mdash; but nothing here
+  is gated. Alpha, beta and release-candidate builds are listed alongside it and are
+  yours to take if you want to try something earlier.</p>
 
   <div class="filter-bar">
     <button class="filter-btn active" onclick="filterReleases('all', this)">All Releases</button>
     <button class="filter-btn" onclick="filterReleases('stable', this)">Stable Releases</button>
-    <button class="filter-btn" onclick="filterReleases('prerelease', this)">Alpha / Beta Pre-releases</button>
+    <button class="filter-btn" onclick="filterReleases('prerelease', this)">Alpha / Beta / RC Pre-releases</button>
   </div>
+
+  <p style="margin-top:1.25rem;font-size:0.82rem;color:var(--text-muted);line-height:1.65;">
+    Pre-releases are untested by definition &mdash; they exist so features can be tried
+    early, and reports on them are welcome. Each release below carries its own
+    install command. In general: <code class="mono" style="color:var(--cyan);">pip install
+    vapor-ram</code> gives you the newest stable build, pinning an exact version
+    (<code class="mono" style="color:var(--cyan);">==&lt;version&gt;</code>) gives you that
+    one &mdash; pre-releases included &mdash; and
+    <code class="mono" style="color:var(--cyan);">--pre</code> lets pip pick the newest
+    pre-release on its own. PyPI normalises pre-release versions, so a
+    <code class="mono">-beta.3</code> tag installs as <code class="mono">b3</code>.
+  </p>
 </div>
 
 <!-- Dynamic Release Container -->
@@ -357,6 +372,18 @@ footer .flinks a:hover { color: var(--cyan); }
 <script>
 let allReleases = [];
 
+// Channel derived from the tag itself. Every prerelease used to render as
+// "Alpha Preview", so betas and release candidates were mislabelled as alphas.
+function channelOf(rel) {
+  const tag = (rel.tag_name || '').toLowerCase();
+  if (!rel.prerelease) return { key: 'stable', label: 'Stable Release' };
+  if (tag.includes('-rc.')) return { key: 'prerelease', label: 'Release Candidate' };
+  if (tag.includes('-beta.')) return { key: 'prerelease', label: 'Beta Preview' };
+  if (tag.includes('-alpha.')) return { key: 'prerelease', label: 'Alpha Preview' };
+  return { key: 'prerelease', label: 'Pre-release' };
+}
+
+
 async function loadReleases() {
   const container = document.getElementById('releases-container');
   try {
@@ -369,7 +396,7 @@ async function loadReleases() {
   } catch (e) {
     console.warn("GitHub API error, using static fallback:", e);
   }
-  renderFallback();
+  renderUnavailable('releases-container');
 }
 
 function renderReleases(releases) {
@@ -381,6 +408,7 @@ function renderReleases(releases) {
 
   container.innerHTML = releases.map(rel => {
     const isStable = !rel.prerelease;
+    const channel = channelOf(rel);
     const pubDate = new Date(rel.published_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
     const renderedBody = window.marked ? marked.parse(rel.body || '') : (rel.body || '');
 
@@ -407,7 +435,7 @@ function renderReleases(releases) {
         <div class="release-header">
           <div class="release-ver">
             <span>${rel.tag_name}</span>
-            <span class="channel-badge ${isStable ? 'stable' : 'prerelease'}">${isStable ? 'Stable Release' : 'Alpha Preview'}</span>
+            <span class="channel-badge ${channel.key}">${channel.label}</span>
           </div>
           <span class="release-date">Published: ${pubDate}</span>
         </div>
@@ -438,30 +466,26 @@ function filterReleases(type, btn) {
   }
 }
 
-function renderFallback() {
-  allReleases = [
-    {
-      tag_name: "v1.0.7-alpha.1",
-      prerelease: true,
-      published_at: "2026-08-02",
-      body: "### ✨ New Features & Enhancements\n- **Next.js + shadcn/ui Dashboard**: Rebuilt Web UI with Next.js, Tailwind CSS, and shadcn/ui.\n- **Dynamic Context Adjustment (`/system/context`)**: Scale context window between 512 and 8,192 tokens.\n- **Concurrent Slot Guarding**: Introduced slot locks and SSE connection resilience.",
-      assets: [
-        { name: "vapor-ram-v1.0.7-alpha.1-linux-x86_64.tar.gz", size: 142100000, download_count: 12, browser_download_url: "https://github.com/sudsarkar13/vapor-ram/releases/download/v1.0.7-alpha.1/vapor-ram-v1.0.7-alpha.1-linux-x86_64.tar.gz" },
-        { name: "vapor-ram-v1.0.7-alpha.1-macos.tar.gz", size: 142050000, download_count: 8, browser_download_url: "https://github.com/sudsarkar13/vapor-ram/releases/download/v1.0.7-alpha.1/vapor-ram-v1.0.7-alpha.1-macos.tar.gz" }
-      ]
-    },
-    {
-      tag_name: "v1.0.6",
-      prerelease: false,
-      published_at: "2026-08-01",
-      body: "### 🚀 Highlights & Features\n- **Apple Silicon MacBook Support**: Detects M1–M5 & A18 Pro chipsets and ARM NEON / AMX matrix extensions.\n- **Expanded 8,192 Max Output Limit**: Output ceiling expanded to 8,192 tokens.\n- **Linux Terminal Signal Shutdown**: Clean instant termination on `CTRL+C`.",
-      assets: [
-        { name: "vapor-ram-v1.0.6-linux-x86_64.tar.gz", size: 142100000, download_count: 45, browser_download_url: "https://github.com/sudsarkar13/vapor-ram/releases/download/v1.0.6/vapor-ram-v1.0.6-linux-x86_64.tar.gz" },
-        { name: "vapor-ram-v1.0.6-macos.tar.gz", size: 142050000, download_count: 32, browser_download_url: "https://github.com/sudsarkar13/vapor-ram/releases/download/v1.0.6/vapor-ram-v1.0.6-macos.tar.gz" }
-      ]
-    }
-  ];
-  renderReleases(allReleases);
+// The GitHub API is the only source of release data. It used to fall back to a
+// hard-coded list whose download counts (12, 45, 32) and file sizes (142 MB;
+// the real tarballs are ~1.2 MB) were invented, and which froze on an early
+// alpha — so a rate-limited visitor was shown fabricated figures for releases
+// that were eight versions out of date. Now it says what happened and points
+// at the source, which is never blocked.
+function renderUnavailable(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `
+    <div style="padding:2.5rem;text-align:center;color:var(--text-muted);">
+      <p style="margin-bottom:0.75rem;">Could not reach the GitHub API just now
+      (it rate-limits unauthenticated requests).</p>
+      <p style="margin-bottom:1.25rem;">Every release — stable and pre-release
+      alike — is listed here:</p>
+      <a class="btn-ghost" target="_blank"
+         href="https://github.com/sudsarkar13/vapor-ram/releases">
+        All releases on GitHub
+      </a>
+    </div>`;
 }
 
 loadReleases();

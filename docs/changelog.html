@@ -276,7 +276,7 @@ footer .flinks a:hover { color: var(--cyan); }
 <nav>
   <div class="in">
     <a href="index.html" class="brand">
-      <span style="font-size:1.4rem;line-height:1;display:inline-block;-webkit-text-fill-color:initial;">💨</span> VaporRAM <span class="vtag">v1.0.6</span>
+      <span style="font-size:1.4rem;line-height:1;display:inline-block;-webkit-text-fill-color:initial;">💨</span> VaporRAM <span class="vtag"><!--VERSION-->v1.0.7<!--/VERSION--></span>
     </a>
     <div class="nl">
       <a href="index.html#features">Architecture</a>
@@ -334,7 +334,7 @@ async function loadChangelog() {
   } catch (e) {
     console.warn("GitHub API error, rendering fallback changelog:", e);
   }
-  renderFallbackChangelog();
+  renderUnavailable('changelog-timeline');
 }
 
 function renderChangelog(releases) {
@@ -355,7 +355,7 @@ function renderChangelog(releases) {
           <div class="timeline-header">
             <div class="timeline-ver">
               <span>${rel.tag_name}</span>
-              <span class="tag-badge ${isStable ? 'stable' : 'prerelease'}">${isStable ? 'Stable Release' : 'Alpha Preview'}</span>
+              <span class="tag-badge ${channelOf(rel).key}">${channelOf(rel).label}</span>
             </div>
             <div style="display:flex;align-items:center;gap:1rem;">
               <span class="timeline-date">${pubDate}</span>
@@ -372,31 +372,37 @@ function renderChangelog(releases) {
   }).join('');
 }
 
-function renderFallbackChangelog() {
-  const fallbackReleases = [
-    {
-      tag_name: "v1.0.7-alpha.1",
-      prerelease: true,
-      published_at: "2026-08-02",
-      html_url: "https://github.com/sudsarkar13/vapor-ram/releases/tag/v1.0.7-alpha.1",
-      body: "### 🚀 Highlights & Features\n- **Next.js + shadcn/ui Dashboard Migration**: Rebuilt local Web UI with Next.js, Tailwind CSS, and shadcn/ui featuring real-time SSE streaming, syntax highlighting, and 0 end-user Node.js dependencies.\n- **Dynamic Context Window Endpoint (`/system/context`)**: Added runtime context adjustment endpoint to dynamically scale context window (`n_ctx`) between 512 and 8,192 tokens.\n- **Concurrent Slot Guarding**: Introduced slot locks (`_slot_begin` / `_slot_end`) and graceful SSE disconnect handling."
-    },
-    {
-      tag_name: "v1.0.6",
-      prerelease: false,
-      published_at: "2026-08-01",
-      html_url: "https://github.com/sudsarkar13/vapor-ram/releases/tag/v1.0.6",
-      body: "### 🚀 Highlights & Features\n- **Apple Silicon MacBook Support**: Expanded hardware inspector (`doctor.py`) to identify Apple Silicon M-Series chipsets (M1, M2, M3, M4, M5, A18 Pro) and ARM NEON / AMX matrix extensions.\n- **Expanded Max Output Limit**: Increased max generation token ceiling to 8,192 tokens.\n- **Linux Terminal Signal Clean Shutdown**: Updated HTTP server socket timeout and SIGINT signal handler to cleanly terminate immediately on CTRL+C."
-    },
-    {
-      tag_name: "v1.0.5",
-      prerelease: false,
-      published_at: "2026-07-31",
-      html_url: "https://github.com/sudsarkar13/vapor-ram/releases/tag/v1.0.5",
-      body: "### 🚀 Highlights & Features\n- **Double-Buffer O_DIRECT Layer Streamer**: Initial C engine release supporting 140 MB/layer POSIX unbuffered streaming with AVX2 SIMD matrix kernels."
-    }
-  ];
-  renderChangelog(fallbackReleases);
+// Channel derived from the tag itself. Every prerelease used to render as
+// "Alpha Preview", so betas and release candidates were mislabelled as alphas.
+function channelOf(rel) {
+  const tag = (rel.tag_name || '').toLowerCase();
+  if (!rel.prerelease) return { key: 'stable', label: 'Stable Release' };
+  if (tag.includes('-rc.')) return { key: 'prerelease', label: 'Release Candidate' };
+  if (tag.includes('-beta.')) return { key: 'prerelease', label: 'Beta Preview' };
+  if (tag.includes('-alpha.')) return { key: 'prerelease', label: 'Alpha Preview' };
+  return { key: 'prerelease', label: 'Pre-release' };
+}
+
+// The GitHub API is the only source of release data. It used to fall back to a
+// hard-coded list whose download counts (12, 45, 32) and file sizes (142 MB;
+// the real tarballs are ~1.2 MB) were invented, and which froze on an early
+// alpha — so a rate-limited visitor was shown fabricated figures for releases
+// that were eight versions out of date. Now it says what happened and points
+// at the source, which is never blocked.
+function renderUnavailable(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `
+    <div style="padding:2.5rem;text-align:center;color:var(--text-muted);">
+      <p style="margin-bottom:0.75rem;">Could not reach the GitHub API just now
+      (it rate-limits unauthenticated requests).</p>
+      <p style="margin-bottom:1.25rem;">Every release — stable and pre-release
+      alike — is listed here:</p>
+      <a class="btn-ghost" target="_blank"
+         href="https://github.com/sudsarkar13/vapor-ram/releases">
+        All releases on GitHub
+      </a>
+    </div>`;
 }
 
 loadChangelog();

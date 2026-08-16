@@ -87,9 +87,13 @@ Download the tarball for your platform from the
 [latest release](https://github.com/sudsarkar13/vapor-ram/releases/latest):
 
 ```bash
-tar xzf vapor-ram-v1.0.7-linux-x86_64.tar.gz
-cd vapor-ram-v1.0.7
+tar xzf vapor-ram-v<version>-linux-x86_64.tar.gz
+cd vapor-ram-v<version>
 ```
+
+Pre-release builds (alpha, beta, rc) are published alongside stable and are
+listed on the [releases page](https://sudsarkar13.github.io/vapor-ram/releases.html).
+Nothing is gated — take whichever you want.
 
 ### Option 3: From source
 

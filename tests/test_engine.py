@@ -9,7 +9,7 @@ static asset serving.
 These tests never require model weights — generation itself is covered by asserting
 that a weightless engine returns a clean 503 rather than a fabricated answer.
 """
-import os, sys, json, time, socket, threading, urllib.request, urllib.error, subprocess, tempfile, shutil
+import os, sys, json, time, socket, threading, urllib.request, urllib.error, subprocess, tempfile, shutil, re
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
@@ -851,6 +851,73 @@ def test_stable_release_honesty(port):
               "run_stream_benchmark" in src, "not wired to the measurement path")
 
 
+
+def test_docs_channel_policy():
+    """The site advertises stable only, but gates no release from users.
+
+    Two separate rules, both easy to break by hand:
+
+      1. The GitHub Pages version badge must never name an alpha, beta or RC.
+         Enforced by the `docs` job's `channel == 'stable'` gate.
+      2. The releases and changelog pages must keep listing *every* release,
+         prereleases included. Users choose what to run; the site only chooses
+         what to advertise.
+    """
+    print("\n[14] Docs channel policy")
+    docs = os.path.join(HERE, "docs")
+    pages = ["index.html", "releases.html", "changelog.html"]
+    prerelease = re.compile(r"v\d+\.\d+\.\d+-(?:alpha|beta|rc)\.\d+")
+    version = re.compile(r"v\d+\.\d+\.\d+(?:-[a-z]+\.\d+)?")
+
+    for name in pages:
+        path = os.path.join(docs, name)
+        if not os.path.exists(path):
+            check(f"{name} exists", False, "missing")
+            continue
+        html = open(path, encoding="utf-8").read()
+
+        check(f"{name} version is marker-managed",
+              "<!--VERSION-->" in html, "no <!--VERSION--> marker")
+
+        # The advertised version must be a stable one.
+        check(f"{name} advertises no prerelease",
+              not prerelease.search(html),
+              str(set(prerelease.findall(html))))
+
+        # And exactly one version may appear, so no stray literal can drift.
+        found = set(version.findall(html))
+        check(f"{name} names exactly one version",
+              len(found) == 1, str(sorted(found)))
+
+    # Users must not be gated: both listing pages read the live API.
+    for name in ("releases.html", "changelog.html"):
+        html = open(os.path.join(docs, name), encoding="utf-8").read()
+        check(f"{name} reads releases from the GitHub API",
+              "api.github.com/repos/sudsarkar13/vapor-ram/releases" in html,
+              "no live release source")
+        check(f"{name} no longer ships fabricated release data",
+              "download_count:" not in html and "142100000" not in html,
+              "invented download counts or file sizes present")
+
+    rel = open(os.path.join(docs, "releases.html"), encoding="utf-8").read()
+    check("releases page still offers a prerelease filter",
+          "filterReleases('prerelease'" in rel, "prerelease filter removed")
+    check("prerelease channels are labelled from the tag, not all as alpha",
+          "channelOf" in rel and "Beta Preview" in rel,
+          "betas and RCs would render as Alpha Preview")
+
+    # The gate itself.
+    wf = os.path.join(HERE, ".github", "workflows", "release.yml")
+    if os.path.exists(wf):
+        src = open(wf, encoding="utf-8").read()
+        check("docs job is gated on the stable channel",
+              "needs.validate.outputs.channel == 'stable'" in src,
+              "gate missing — prereleases would move the site")
+        check("docs job syncs all three pages",
+              all(f'docs/{n}' in src for n in pages),
+              "a page would drift behind the others")
+
+
 def main():
     print("=" * 60)
     print("   VaporRAM Integration Test Suite")
@@ -897,6 +964,7 @@ def main():
     test_thinking_mode()
     test_network_sharing()
     test_stable_release_honesty(port)
+    test_docs_channel_policy()
 
     print("\n" + "=" * 60)
     if FAILED:
