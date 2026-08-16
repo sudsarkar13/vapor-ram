@@ -1,85 +1,80 @@
-# v1.0.7-alpha.5 — Alpha Release
+# v1.0.7-alpha.6 — Alpha Release
 
-## 🔄 What's Changed (v1.0.7-alpha.4 ➔ v1.0.7-alpha.5)
+## 🔄 What's Changed (v1.0.7-alpha.5 ➔ v1.0.7-alpha.6)
 
-This release makes the model usable from other devices, makes the server
-stoppable, and makes it roughly **28× faster** in the configuration it shipped
-with.
+This release makes the Brain Cortex report real data, and answers the question
+the tab existed to ask.
 
-### Network sharing
+### The streamer was reading the wrong bytes
 
-The model can now be reached from any device on your network. A key is required
-whenever the server binds a non-loopback interface, so exposing the engine
-cannot silently leave it open — `--no-auth` is the explicit opt-out and the
-banner says so. Keys live in `~/.vapor-ram/api_key` (mode `0600`), never in the
-tracked `vapor.json`.
+`streaming_io.c` read at a fixed `layer_idx × 140 MB` stride from byte 0. That
+corresponds to nothing in a GGUF container: in `gemma-4-E4B-it-Q4_K_M` the
+first transformer block starts 2.37 GB into the file, after the token-embedding
+tables, and spans ~61 MB. At layer 10 the old code read byte 1,468,006,400
+where `blk.10` actually begins at 2,989,328,704. It was streaming embeddings
+and metadata and reporting them as layers.
 
-```bash
-vapor serve     # shared on the LAN, key required and printed
-vapor share     # URL, key, and paste-ready client snippets
-```
+`vapor_engine.c` compounded it — a hardcoded 32 layers against a 42-layer
+model, `avx2_vec_dot(x, x, 8) * 0.001f` over a zeroed buffer, and a fixed
+`printf` presented as model output.
 
-Clients present the key as `Authorization: Bearer`, `X-API-Key`, or `?key=` —
-the last so a phone can open one tappable link.
+### What replaces it
 
-**Security fix:** authentication was previously only enforced on POST. Every GET
-was open to anyone who could reach the port even with `--api-key` set, including
-`/v1/system/progress` (filesystem paths) and `/v1/doctor` (hardware).
+`vapor_ram/gguf.py` parses the GGUF tensor directory: names, shapes,
+quantisation types and exact byte ranges, with block-aware sizing for every
+ggml type. The check that matters — the last tensor ends at 4,977,171,584,
+exactly the file size.
 
-### Performance
+| | |
+| --- | ---: |
+| Transformer blocks | 42 (matches the file's `block_count`) |
+| Tensors | 720 |
+| Block data begins at | byte 2,386,145,088 |
+| Per-block span | ~61 MB |
+| Streamable | 2.41 GB |
+| Resident (embeddings, norms) | 2.21 GB |
 
-`n_threads` used `os.cpu_count()`, running one thread per hyperthread. On a
-Ryzen 7 5700U that costs **3.4×** throughput, because llama.cpp's kernels
-already saturate each core's vector units.
+`vapor_engine` is now a streaming inspector: real byte ranges in, measured JSON
+timings out. It does not claim to generate anything.
 
-| Threads | `n_ctx` | Decode | Peak RSS |
-| ---: | ---: | ---: | ---: |
-| 16 (old) | 16384 | 1.96 tok/s | 8.07 GB |
-| **8 (new)** | 16384 | 6.49 tok/s | 8.07 GB |
-| **8 (new)** | 4096 | **6.42–6.77 tok/s** | 6.80 GB |
+### The measurement
 
-Context size does not affect decode speed at all — only memory. Weights are now
-preloaded at startup, so the first message no longer pays the load on top of its
-own generation.
+Press **Measure** in Brain Cortex. On NVMe this reports **~990 MB/s** under
+`O_DIRECT` and **~59 ms per block**.
 
-### Stopping the server
+Which gives the number worth having: streaming all 42 blocks for every token
+would cost **~2.5 s/token (~0.4 tok/s)**, against **6.8 tok/s** with the
+weights resident. **Trading roughly 17× throughput is what the 1.5 GB ceiling
+would cost on this hardware.**
 
-CTRL+C was ignored while llama.cpp was loading or decoding, because a Python
-signal handler only runs when the main thread reaches the eval loop. Shutdown
-now waits in `sigwait()`, with signals blocked before any thread is created.
-For terminals that never deliver the signal at all, the foreground process group
-and `ISIG` state are detected and reported, `ISIG` is repaired when cleared, and
-a console watchdog reads `^C` as a raw byte. `vapor stop` works from anywhere.
+### Dashboard fixes
 
-### Dashboard
-
-Headings on Brain Cortex, Profiling and Doctor rendered in Playfair Display, a
-serif whose hairlines are close to invisible at the 11–12px uppercase sizes
-those headings use. They now share the body sans.
-
-The KV cache figure was **8× low** — 216 MB reported against ~1.7 GB actually
-allocated. It counted K but not V, assumed int8 where llama.cpp defaults to f16,
-and excluded the shared-KV layers despite llama.cpp allocating a full-size SWA
-cache. Now within 13% of measured.
-
-### Removed
-
-VaporRAM has no thinking mode. The `coder` and `reasoner` presets prefixed their
-system instruction with `<|think|>` — not a Gemma control token, tokenised as
-literal text, consuming context for nothing. An `enable_thinking` config flag no
-code read is gone too.
+- **Generation state survived nothing.** The chat view unmounts when another
+  tab is selected, taking `isGenerating`, the timings and the `AbortController`
+  with it: the stop button vanished mid-reply, the run could no longer be
+  cancelled, and the token/timing footer never appeared — while the stream kept
+  running. Generation now lives outside React and is read through
+  `useSyncExternalStore`.
+- **Profiling never sent the API key**, so on a shared server it answered 401
+  and rendered empty while every other tab worked.
+- **"KV cache slots" displayed `n_ctx`.** Those are tokens; the slot count is 1
+  in single-tenant mode. Split apart, and joined by threads-in-use (with the
+  topology behind it) and measured streaming bandwidth.
 
 ## ⚠️ Known Limitations
 
 - **The 1.5 GB RAM ceiling is not met.** llama.cpp memory-maps the full GGUF;
-  measured RSS is 6.8–8.1 GB depending on context size. The ceiling is a
-  planning target, not an enforced limit.
-- The `O_DIRECT` layer streamer in `c/streaming_io.c` builds but is not wired
-  into the token path, so per-layer streaming state is not reported.
-- Per-kernel attribution (attention vs. matmul vs. LM head) is not instrumented.
+  measured RSS is 6.8–8.1 GB depending on context size.
+- **The streaming path is a measurement path, not the token path.** Generation
+  runs through llama.cpp. Routing generation through the C streamer means
+  writing GGUF tensor loading, Q4_K/Q6_K dequantisation, RMSNorm, RoPE, GQA
+  attention, SwiGLU, sampling and a tokenizer — and the measurement above
+  suggests what it would cost.
+- Per-kernel attribution (attention vs. matmul vs. LM head) is not
+  instrumented, so it is omitted rather than estimated.
 
 ## 📦 Install
 
 ```bash
-pip install --pre vapor-ram==1.0.7a5
+pip install --pre vapor-ram==1.0.7a6
 ```

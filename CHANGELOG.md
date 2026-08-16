@@ -4,6 +4,25 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 ---
 
+## [v1.0.7-alpha.6] - 2026-08-16
+
+### 🚀 Highlights & Features
+- **Real GGUF layout in the Brain Cortex**: new `vapor_ram/gguf.py` parses the tensor directory — names, shapes, quantisation types and exact byte ranges, with block-aware sizing for every ggml type. For `gemma-4-E4B-it-Q4_K_M` it reports 42 blocks (matching the file's own `block_count`), 720 tensors, block data starting at byte 2,386,145,088, ~61 MB per block, 2.41 GB streamable against 2.21 GB resident.
+- **Measured O_DIRECT streaming**: `POST /v1/cortex/benchmark` streams each block's real byte range past the page cache and reports per-block timings. Measured ~990 MB/s and ~59 ms per block on NVMe.
+- **The number the tab existed to produce**: at that bandwidth, streaming all 42 blocks per token costs ~2.5 s/token (~0.4 tok/s) against 6.8 tok/s with the weights resident — roughly 17x, which is what the 1.5 GB ceiling would cost on this hardware. Stated in the UI and the README rather than left as an aspiration.
+- **Brain Cortex rebuilt** around that data: block map with spans proportional to real byte sizes, quantisation breakdown, and measured read time overlaid per block after a run.
+
+### 🐛 Fixed Bugs & Issues
+- **The streamer read the wrong bytes.** `streaming_io.c` read at a fixed `layer_idx * 140 MB` stride from byte 0, which corresponds to nothing in a GGUF container. At layer 10 it read byte 1,468,006,400 where `blk.10` begins at 2,989,328,704 — it was streaming token-embedding tables and metadata and reporting them as layers. Ranges now come from the tensor directory.
+- **`vapor_engine.c` computed nothing.** It looped over a hardcoded 32 layers against a 42-layer model, ran `avx2_vec_dot(x, x, 8) * 0.001f` over a zeroed buffer, and printed a fixed sentence as if it were model output. It is now a streaming inspector that takes real ranges and emits measured JSON timings, and no longer claims to generate.
+- **O_DIRECT rejected the GGUF magic check**: an unaligned 4-byte `pread` fails with `EINVAL`, so every valid GGUF was reported as headerless.
+- **`architecture.layer_buffer_mb` was the constant 140**; it is now measured from the file (68.4 MB for this model).
+- **Generation state was lost on tab switch**: the chat view unmounts when another tab is selected, taking `isGenerating`, the timings and the `AbortController` with it — the stop button vanished mid-reply, the run could no longer be cancelled, and the token/timing footer never appeared, while the stream kept running. Generation now lives in `lib/generation.ts` and is read through `useSyncExternalStore`, so remounting reads current truth.
+- **Profiling never sent the API key**: it used a private `fetch()` rather than the shared client, so on a shared server the tab answered 401 and rendered empty while every other tab worked.
+- **"KV cache slots" displayed `n_ctx`**: those are tokens. Split into a context-window figure and the real slot count (1 in single-tenant mode), alongside new tiles for threads in use and measured streaming bandwidth.
+
+---
+
 ## [v1.0.7-alpha.5] - 2026-08-16
 
 ### 🚀 Highlights & Features
