@@ -194,6 +194,8 @@ MODEL_N_KV_HEADS = 2
 MODEL_HEAD_DIM = 256
 MODEL_KV_SHARED_LAYERS = 18
 MODEL_SLIDING_WINDOW = 512
+# Fallback only, used when no GGUF has been parsed yet. The real per-layer
+# span is read from the tensor directory by measured_layer_buffer_mb().
 LAYER_BUFFER_MB = 140
 
 # Timings from the most recent generation. Empty until something has actually run —
@@ -303,6 +305,11 @@ try:
     from . import doctor
 except Exception:
     doctor = None
+
+try:
+    from . import cortex
+except Exception:
+    cortex = None
 
 current_model_path = DEFAULT_MODEL_DIR
 download_progress = {"status": "idle", "percent": 0, "message": "Ready",
@@ -523,7 +530,10 @@ def telemetry_snapshot():
             "head_dim": MODEL_HEAD_DIM,
             "kv_shared_layers": MODEL_KV_SHARED_LAYERS,
             "sliding_window": MODEL_SLIDING_WINDOW,
-            "layer_buffer_mb": LAYER_BUFFER_MB,
+            # Measured from the GGUF tensor directory, not assumed. The old
+            # constant claimed 140 MB per layer; the real span for
+            # gemma-4-E4B-it-Q4_K_M is ~61 MB.
+            "layer_buffer_mb": measured_layer_buffer_mb(),
         },
         "ram_ceiling_gb": ram_ceiling_gb,
         "total_ram_gb": round(total, 2),
@@ -534,6 +544,22 @@ def telemetry_snapshot():
         "model_state": state,
         "slots": _slot_snapshot(current_model_path),
     }
+
+
+def measured_layer_buffer_mb():
+    """Largest real transformer-block span in the active GGUF, in MB."""
+    if cortex is None:
+        return LAYER_BUFFER_MB
+    try:
+        gguf = find_gguf(current_model_path)
+        if not gguf:
+            return LAYER_BUFFER_MB
+        report = cortex.layer_report(gguf)
+        if not report or not report.get("layers"):
+            return LAYER_BUFFER_MB
+        return round(max(l["nbytes"] for l in report["layers"]) / (1024 ** 2), 1)
+    except Exception:
+        return LAYER_BUFFER_MB
 
 
 def apply_model_dir(raw):
@@ -1110,12 +1136,21 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         if any(path.endswith(suffix) for suffix in ("/stats", "/cortex", "/profile")):
             tele = telemetry_snapshot()
             timings = dict(last_timings)
-            layers_data = [{
-                "layer": i,
-                "status": "resident" if tele["model_available"] else "no_weights",
-                "buffer_mb": LAYER_BUFFER_MB,
-            } for i in range(1, MODEL_N_LAYERS + 1)]
             rss = tele["process_rss_mb"]
+
+            # Layer data is read from the GGUF tensor directory, so every entry
+            # is a real block with its real byte range and quantisation. The
+            # previous version emitted MODEL_N_LAYERS identical rows carrying a
+            # constant 140 MB "buffer_mb" that corresponded to nothing.
+            gguf = find_gguf(current_model_path)
+            layer_report = None
+            layer_error = None
+            if gguf and cortex is not None:
+                try:
+                    layer_report = cortex.layer_report(gguf)
+                except Exception as e:
+                    layer_error = str(e)
+
             return self._send_json({
                 "status": "active",
                 "version": VERSION,
@@ -1126,7 +1161,9 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                     round(100.0 * rss / (tele["total_ram_gb"] * 1024), 2)
                     if rss and tele["total_ram_gb"] else None),
                 "timings": timings,
-                "layers": layers_data,
+                "layer_report": layer_report,
+                "layer_report_error": layer_error,
+                "stream_benchmark": cortex.last_benchmark() if cortex else None,
                 **tele,
             })
 
@@ -1183,6 +1220,26 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 os.execv(sys.executable, [sys.executable] + sys.argv)
             threading.Thread(target=delayed_restart, daemon=True).start()
             return
+
+        # Stream the real layer byte ranges through the O_DIRECT reader and
+        # measure them. Moves gigabytes, so it is an explicit action rather
+        # than something a poll can trigger.
+        if path.endswith("/cortex/benchmark") or path.endswith("/system/stream_benchmark"):
+            if cortex is None:
+                return self._send_json(
+                    {"error": "Unavailable", "message": "cortex module failed to import"},
+                    status=503)
+            gguf = find_gguf(current_model_path)
+            if not gguf:
+                return self._send_json(
+                    {"error": "No Weights",
+                     "message": f"No .gguf found in {current_model_path}"}, status=404)
+            result = cortex.run_stream_benchmark(gguf)
+            if result.get("error"):
+                return self._send_json(
+                    {"error": result["error"], "message": result.get("message", "")},
+                    status=503)
+            return self._send_json({"status": "ok", "stream_benchmark": result})
 
         # Set custom system model path endpoint
         if path.endswith("/set_model_path") or path.endswith("/system/set_model_path"):

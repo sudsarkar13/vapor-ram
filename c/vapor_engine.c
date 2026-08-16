@@ -1,146 +1,146 @@
+/* VaporRAM streaming inspector.
+ *
+ * What this is: a measurement tool. It streams the real byte ranges of a
+ * GGUF's transformer blocks through the O_DIRECT reader and reports what the
+ * device actually delivered.
+ *
+ * What this is not: the token path. Generation runs through llama.cpp.
+ * The previous version of this file claimed otherwise -- it looped over a
+ * hardcoded 32 layers (the model has 42), ran `avx2_vec_dot(x, x, 8) * 0.001f`
+ * on a zeroed buffer, and printed a fixed sentence as if it were model output.
+ * None of that computed anything. Layer ranges now come from the caller, which
+ * resolves them from the GGUF tensor directory.
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 #include <time.h>
-#include <ctype.h>
-#if defined(__AVX2__) || defined(__x86_64__) || defined(_M_X64)
-#include <immintrin.h>
-#endif
-#ifdef _OPENMP
-#include <omp.h>
-#endif
+#include <stdint.h>
 #include "streaming_io.h"
-#include "kv_cache.h"
 
 #define VAPOR_VERSION "1.0.7-alpha.5"
+#define MAX_LAYERS 512
 
-#define GEMMA_4_E4B_LAYERS 32
-#define GEMMA_HIDDEN_DIM 3072
-#define LAYER_BYTES (140 * 1024 * 1024) // ~140 MB per layer
+typedef struct {
+    int index;
+    uint64_t offset;
+    uint64_t nbytes;
+} LayerRange;
 
-// AVX2 optimized dot product for 4-bit / 8-bit layer computations
-static float avx2_vec_dot(const float *a, const float *b, int size) {
-#if defined(__AVX2__)
-    __m256 sum = _mm256_setzero_ps();
-    int i = 0;
-    for (; i <= size - 8; i += 8) {
-        __m256 va = _mm256_loadu_ps(&a[i]);
-        __m256 vb = _mm256_loadu_ps(&b[i]);
-        sum = _mm256_fmadd_ps(va, vb, sum);
-    }
-    float buffer[8];
-    _mm256_storeu_ps(buffer, sum);
-    float total = buffer[0] + buffer[1] + buffer[2] + buffer[3] +
-                  buffer[4] + buffer[5] + buffer[6] + buffer[7];
-    for (; i < size; i++) {
-        total += a[i] * b[i];
-    }
-    return total;
-#else
-    float total = 0.0f;
-    for (int i = 0; i < size; i++) {
-        total += a[i] * b[i];
-    }
-    return total;
-#endif
+static double now_seconds(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
-// Gemma RMSNorm layer normalization with custom scaling (+ 1.0f)
-void rmsnorm(float *o, const float *x, const float *weight, int size) {
-    float ss = 0.0f;
-    for (int i = 0; i < size; i++) {
-        ss += x[i] * x[i];
+/* Plan file: one "index offset nbytes" triple per line, produced from the
+   GGUF tensor directory. Comments and blank lines are ignored. */
+static int read_plan(const char *path, LayerRange *out, int max_items) {
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    char line[256];
+    int n = 0;
+    while (n < max_items && fgets(line, sizeof(line), f)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+        LayerRange r;
+        if (sscanf(line, "%d %llu %llu", &r.index,
+                   (unsigned long long*)&r.offset,
+                   (unsigned long long*)&r.nbytes) == 3) {
+            out[n++] = r;
+        }
     }
-    ss /= size;
-    float scale = 1.0f / sqrtf(ss + 1e-6f);
-    for (int i = 0; i < size; i++) {
-        o[i] = x[i] * scale * (weight[i] + 1.0f);
-    }
+    fclose(f);
+    return n;
+}
+
+static void usage(const char *argv0) {
+    fprintf(stderr, "VaporRAM streaming inspector v" VAPOR_VERSION "\n");
+    fprintf(stderr, "Usage: %s <model.gguf> <plan-file>\n", argv0);
+    fprintf(stderr, "  plan-file: lines of \"<layer_index> <byte_offset> <byte_length>\"\n");
+    fprintf(stderr, "Emits one JSON object per line with measured read timings.\n");
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        fprintf(stderr, "VaporRAM Engine v" VAPOR_VERSION " (Ultra-Low RAM SSD Streaming Engine for Gemma 4 E4B-it)\n");
-        fprintf(stderr, "Usage: %s <model_weights.bin> [prompt]\n", argv[0]);
+    if (argc < 3) {
+        usage(argv[0]);
         return 1;
     }
 
     const char *model_path = argv[1];
-    const char *prompt = (argc >= 3) ? argv[2] : "Hello";
+    const char *plan_path = argv[2];
 
-    fprintf(stderr, "=== VaporRAM Engine v" VAPOR_VERSION " ===\n");
-    fprintf(stderr, "[Target Model] google/gemma-4-E4B-it\n");
-    fprintf(stderr, "[RAM Ceiling ] < 1.5 GB\n");
-    fprintf(stderr, "[Streaming IO] O_DIRECT SSD Double-Buffer (140 MB/layer)\n");
-    /* Report the ISA and threading actually compiled in, rather than asserting
-       AVX2 + OpenMP on builds where neither flag was accepted (e.g. arm64). */
-    int num_threads = 1;
-#ifdef _OPENMP
-    num_threads = omp_get_max_threads();
-#endif
-#if defined(__AVX2__)
-    const char *isa = "AVX2 + FMA3";
-#elif defined(__ARM_NEON) || defined(__aarch64__)
-    const char *isa = "ARM NEON";
-#else
-    const char *isa = "scalar";
-#endif
-#ifdef _OPENMP
-    fprintf(stderr, "[SIMD Engine ] %s + OpenMP (%d threads)\n", isa, num_threads);
-#else
-    fprintf(stderr, "[SIMD Engine ] %s (single-threaded, no OpenMP)\n", isa);
-#endif
-    fprintf(stderr, "[Input Prompt] \"%s\"\n\n", prompt);
+    LayerRange plan[MAX_LAYERS];
+    int n_layers = read_plan(plan_path, plan, MAX_LAYERS);
+    if (n_layers <= 0) {
+        fprintf(stderr, "[Error] Could not read a usable plan from %s\n", plan_path);
+        return 1;
+    }
 
-    // Initialize Streaming IO
-    StreamingReader *streamer = streaming_io_init(model_path, LAYER_BYTES);
+    uint64_t max_chunk = 0;
+    for (int i = 0; i < n_layers; i++)
+        if (plan[i].nbytes > max_chunk) max_chunk = plan[i].nbytes;
+
+    StreamingReader *streamer = streaming_io_init(model_path, (size_t)max_chunk);
     if (!streamer) {
-        fprintf(stderr, "[Error] Failed to initialize layer streamer for %s\n", model_path);
+        fprintf(stderr, "[Error] Failed to open %s for streaming\n", model_path);
         return 1;
     }
 
-    // Initialize Quantized KV Cache
-    KVCache *kv_cache = kv_cache_init(2048, GEMMA_4_E4B_LAYERS, 16, 256);
-    if (!kv_cache) {
-        fprintf(stderr, "[Error] Failed to initialize int8 KV Cache\n");
-        streaming_io_free(streamer);
-        return 1;
-    }
+    printf("{\"event\":\"start\",\"version\":\"" VAPOR_VERSION "\",\"layers\":%d,"
+           "\"o_direct\":%s,\"max_chunk_bytes\":%llu}\n",
+           n_layers, streamer->direct ? "true" : "false",
+           (unsigned long long)max_chunk);
+    fflush(stdout);
 
-    float *hidden_states = (float*)calloc(GEMMA_HIDDEN_DIM, sizeof(float));
+    double run_start = now_seconds();
+    uint64_t total_bytes = 0;
+    int failures = 0;
 
-    clock_t start_time = clock();
+    for (int i = 0; i < n_layers; i++) {
+        /* Tell the kernel about the next range while this one is in flight. */
+        if (i + 1 < n_layers)
+            streaming_io_prefetch(streamer, plan[i + 1].offset, (size_t)plan[i + 1].nbytes);
 
-    fprintf(stderr, "Executing 32 Transformer Layers...\n");
-    for (int l = 0; l < GEMMA_4_E4B_LAYERS; l++) {
-        // Stream single layer from disk (140 MB) into active RAM buffer
-        void *layer_data = streaming_io_load_layer(streamer, l);
-        if (!layer_data) {
-            fprintf(stderr, "[Error] Disk read failure on Layer %d\n", l);
-            break;
+        double t0 = now_seconds();
+        void *data = streaming_io_read_range(streamer, plan[i].offset,
+                                             (size_t)plan[i].nbytes);
+        double elapsed = now_seconds() - t0;
+
+        if (!data) {
+            failures++;
+            printf("{\"event\":\"layer\",\"layer\":%d,\"ok\":false}\n", plan[i].index);
+            fflush(stdout);
+            continue;
         }
 
-        // Perform layer computations using AVX2 SIMD
-        #pragma omp parallel for
-        for (int i = 0; i < GEMMA_HIDDEN_DIM; i += 64) {
-            hidden_states[i] += avx2_vec_dot(&hidden_states[i], &hidden_states[i], 8) * 0.001f;
-        }
+        /* Touch the buffer so the read cannot be optimised away and the pages
+           are genuinely resident; also a cheap checksum over the first words. */
+        uint64_t checksum = 0;
+        const unsigned char *bytes = (const unsigned char*)data;
+        size_t step = plan[i].nbytes > 4096 ? plan[i].nbytes / 4096 : 1;
+        for (size_t k = 0; k < plan[i].nbytes; k += step)
+            checksum += bytes[k];
 
-        fprintf(stderr, " -> Layer %2d/32 processed [RAM < 950 MB]\r", l + 1);
-        fflush(stderr);
+        total_bytes += plan[i].nbytes;
+        double mb = (double)plan[i].nbytes / (1024.0 * 1024.0);
+        printf("{\"event\":\"layer\",\"layer\":%d,\"ok\":true,\"bytes\":%llu,"
+               "\"ms\":%.3f,\"mb_per_s\":%.2f,\"checksum\":%llu}\n",
+               plan[i].index, (unsigned long long)plan[i].nbytes,
+               elapsed * 1000.0, elapsed > 0 ? mb / elapsed : 0.0,
+               (unsigned long long)checksum);
+        fflush(stdout);
     }
 
-    double elapsed = (double)(clock() - start_time) / CLOCKS_PER_SEC;
-    fprintf(stderr, "\n[Success] Token Generation Completed in %.2f seconds!\n", elapsed);
+    double total = now_seconds() - run_start;
+    double total_mb = (double)total_bytes / (1024.0 * 1024.0);
+    printf("{\"event\":\"done\",\"layers_read\":%d,\"failures\":%d,"
+           "\"total_bytes\":%llu,\"total_ms\":%.3f,\"mb_per_s\":%.2f,"
+           "\"peak_buffer_bytes\":%llu}\n",
+           n_layers - failures, failures, (unsigned long long)total_bytes,
+           total * 1000.0, total > 0 ? total_mb / total : 0.0,
+           (unsigned long long)(streamer->buf_size * 2));
+    fflush(stdout);
 
-    // Pure GGUF model execution output (no hardcoded general information strings)
-    printf("Model response for '%s' processed across 32 transformer layers.", prompt);
-
-    // Clean up memory
-    free(hidden_states);
-    kv_cache_free(kv_cache);
     streaming_io_free(streamer);
-
-    return 0;
+    return failures ? 2 : 0;
 }

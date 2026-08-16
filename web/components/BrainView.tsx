@@ -1,24 +1,137 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
-import { Cpu, HardDrive, Layers, MemoryStick, Info } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { fetchHealth, VaporHealth } from "@/lib/api";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import {
+	Layers,
+	HardDriveDownload,
+	Gauge,
+	Play,
+	Loader2,
+	AlertTriangle,
+	FileBox,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+	fetchCortex,
+	runStreamBenchmark,
+	CortexReport,
+	GgufLayer,
+	StreamBenchmark,
+} from "@/lib/api";
+
+const QUANT_COLORS: Record<string, string> = {
+	Q4_K: "bg-cyan-500",
+	Q5_K: "bg-indigo-500",
+	Q6_K: "bg-violet-500",
+	Q8_0: "bg-fuchsia-500",
+	F32: "bg-slate-500",
+	F16: "bg-slate-400",
+	BF16: "bg-slate-400",
+};
+
+function fmtBytes(n: number | undefined | null): string {
+	if (n === undefined || n === null) return "—";
+	if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(2)} GB`;
+	if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+	if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`;
+	return `${n} B`;
+}
+
+function fmtHex(n: number): string {
+	return `0x${n.toString(16)}`;
+}
+
+/** Fixed-width figure with its unit, so columns line up down the page. */
+function Figure({
+	label,
+	value,
+	unit,
+	hint,
+}: {
+	label: string;
+	value: string;
+	unit?: string;
+	hint?: string;
+}) {
+	return (
+		<div className="min-w-0">
+			<div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+				{label}
+			</div>
+			<div className="mt-1 flex items-baseline gap-1.5">
+				<span className="text-xl font-semibold text-slate-100 tabular-nums">
+					{value}
+				</span>
+				{unit && <span className="text-xs text-slate-500">{unit}</span>}
+			</div>
+			{hint && <div className="mt-0.5 text-[11px] text-slate-500">{hint}</div>}
+		</div>
+	);
+}
+
+/** One row per real transformer block, width proportional to its byte span. */
+function LayerRow({
+	layer,
+	maxBytes,
+	measuredMs,
+	maxMs,
+}: {
+	layer: GgufLayer;
+	maxBytes: number;
+	measuredMs?: number;
+	maxMs?: number;
+}) {
+	const widthPct = (layer.nbytes / maxBytes) * 100;
+	const primary = layer.quant_types.find((q) => q.startsWith("Q")) ?? "F32";
+	const color = QUANT_COLORS[primary] ?? "bg-slate-600";
+
+	return (
+		<div className="group flex items-center gap-3 py-1">
+			<div className="w-10 shrink-0 text-right text-[11px] tabular-nums text-slate-500">
+				{layer.layer}
+			</div>
+			<div className="relative h-5 flex-1 overflow-hidden rounded bg-slate-900">
+				<div
+					className={`h-full ${color} opacity-70 transition-opacity group-hover:opacity-100`}
+					style={{ width: `${widthPct}%` }}
+				/>
+				{measuredMs !== undefined && maxMs ? (
+					<div
+						className="absolute inset-y-0 left-0 border-r-2 border-amber-400"
+						style={{ width: `${(measuredMs / maxMs) * 100}%` }}
+						title={`measured read ${measuredMs.toFixed(1)} ms`}
+					/>
+				) : null}
+			</div>
+			<div className="w-16 shrink-0 text-right text-[11px] tabular-nums text-slate-400">
+				{(layer.nbytes / 1024 ** 2).toFixed(1)} MB
+			</div>
+			<div className="w-16 shrink-0 text-right text-[11px] tabular-nums text-amber-400/90">
+				{measuredMs !== undefined ? `${measuredMs.toFixed(1)} ms` : ""}
+			</div>
+			<div className="hidden w-40 shrink-0 truncate text-[11px] text-slate-600 lg:block">
+				{fmtHex(layer.offset)}
+			</div>
+		</div>
+	);
+}
 
 export function BrainView() {
-	const [health, setHealth] = useState<VaporHealth | null>(null);
+	const [report, setReport] = useState<CortexReport | null>(null);
+	const [running, setRunning] = useState(false);
+	const [benchError, setBenchError] = useState<string | null>(null);
+	const [bench, setBench] = useState<StreamBenchmark | null>(null);
 
-	const load = useCallback(async () => {
-		setHealth(await fetchHealth());
-	}, []);
-
+	// Polling lives inside the effect and guards on a cancelled flag, so no
+	// state is set synchronously during the effect body or after unmount.
 	useEffect(() => {
 		let cancelled = false;
-		const tick = () =>
-			fetchHealth().then((h) => {
-				if (!cancelled) setHealth(h);
-			});
+		const tick = async () => {
+			const r = await fetchCortex();
+			if (cancelled || !r) return;
+			setReport(r);
+			if (r.stream_benchmark) setBench(r.stream_benchmark);
+		};
 		tick();
 		const id = setInterval(tick, 5000);
 		return () => {
@@ -27,163 +140,261 @@ export function BrainView() {
 		};
 	}, []);
 
-	const arch = health?.architecture;
-	const layers = arch?.n_layers ?? 0;
-	const uniqueKv = arch ? arch.n_layers - arch.kv_shared_layers : 0;
-	const ready = health?.model_state.status === "ready";
+	const startBenchmark = useCallback(async () => {
+		setRunning(true);
+		setBenchError(null);
+		const res = await runStreamBenchmark();
+		setRunning(false);
+		if (res?.stream_benchmark) setBench(res.stream_benchmark);
+		else setBenchError(res?.message || "The streaming run did not complete.");
+	}, []);
 
-	return (
-		<div className="h-full bg-slate-950 p-6 overflow-y-auto space-y-6 text-slate-100 font-sans">
-			<div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-				<div>
-					<h2 className="text-xl font-bold text-cyan-400 flex items-center gap-2">
-						<Cpu className="h-5 w-5" />
-						Model Architecture
-					</h2>
-					<p className="text-xs text-slate-400 mt-1">
-						Read from the active model&apos;s{" "}
-						<span className="font-mono text-cyan-300">config.json</span>
-						{health?.gguf_file ? ` · ${health.gguf_file}` : ""}.
-					</p>
-				</div>
-
-				<Badge
-					variant="outline"
-					className={
-						ready
-							? "bg-emerald-950 text-emerald-400 border-emerald-500/30 text-xs"
-							: "bg-slate-900 text-slate-400 border-slate-700 text-xs"
-					}>
-					{health?.model_state.status ?? "unknown"}
-				</Badge>
-			</div>
-
-			{!health && (
-				<Card className="bg-slate-900/60 border-slate-800">
-					<CardContent className="p-4 text-xs text-slate-400 font-mono">
-						Engine unreachable.
-					</CardContent>
-				</Card>
-			)}
-
-			{arch && (
-				<>
-					<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-						<Card className="bg-slate-900/60 border-cyan-500/30">
-							<CardHeader className="pb-2">
-								<CardTitle className="text-xs font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
-									<HardDrive className="h-4 w-4" />
-									Transformer Stack
-								</CardTitle>
-							</CardHeader>
-							<CardContent className="space-y-1 text-xs font-mono">
-								<Row label="Hidden layers" value={String(arch.n_layers)} />
-								<Row label="Hidden dim" value={String(arch.hidden_dim)} />
-								<Row label="Attention heads" value={String(arch.n_heads)} />
-							</CardContent>
-						</Card>
-
-						<Card className="bg-slate-900/60 border-indigo-500/30">
-							<CardHeader className="pb-2">
-								<CardTitle className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
-									<MemoryStick className="h-4 w-4" />
-									KV Geometry
-								</CardTitle>
-							</CardHeader>
-							<CardContent className="space-y-1 text-xs font-mono">
-								<Row label="KV heads" value={String(arch.n_kv_heads)} />
-								<Row label="Head dim" value={String(arch.head_dim)} />
-								<Row
-									label="Unique KV layers"
-									value={`${uniqueKv} of ${arch.n_layers}`}
-								/>
-							</CardContent>
-						</Card>
-
-						<Card className="bg-slate-900/60 border-purple-500/30">
-							<CardHeader className="pb-2">
-								<CardTitle className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
-									<Layers className="h-4 w-4" />
-									Active Context
-								</CardTitle>
-							</CardHeader>
-							<CardContent className="space-y-1 text-xs font-mono">
-								<Row label="Context window" value={health.n_ctx.toLocaleString()} />
-								<Row
-									label="Engine maximum"
-									value={health.safe_max_context.toLocaleString()}
-								/>
-								<Row label="Sliding window" value={String(arch.sliding_window)} />
-							</CardContent>
-						</Card>
-					</div>
-
-					<Card className="bg-slate-900/40 border-slate-800">
-						<CardHeader>
-							<CardTitle className="text-sm font-bold text-slate-200">
-								Layer Map ({layers} layers)
-							</CardTitle>
-						</CardHeader>
-						<CardContent>
-							<div className="grid grid-cols-4 sm:grid-cols-8 lg:grid-cols-12 gap-2">
-								{Array.from({ length: layers }).map((_, idx) => {
-									const sharesKv = idx >= layers - arch.kv_shared_layers;
-									return (
-										<div
-											key={idx}
-											title={
-												sharesKv
-													? `Layer ${idx + 1} — shares KV cache`
-													: `Layer ${idx + 1} — own KV cache`
-											}
-											className={`p-2 rounded-lg border text-center transition-colors ${
-												sharesKv
-													? "border-slate-800 bg-slate-950/80"
-													: "border-cyan-500/30 bg-cyan-950/20"
-											}`}>
-											<div className="text-[10px] font-mono text-slate-500">
-												{idx + 1}
-											</div>
-										</div>
-									);
-								})}
-							</div>
-							<div className="flex items-center gap-4 mt-4 text-[10px] font-mono text-slate-500">
-								<span className="flex items-center gap-1.5">
-									<span className="h-2 w-2 rounded-sm border border-cyan-500/30 bg-cyan-950/20" />
-									own KV cache ({uniqueKv})
-								</span>
-								<span className="flex items-center gap-1.5">
-									<span className="h-2 w-2 rounded-sm border border-slate-800 bg-slate-950" />
-									shared KV ({arch.kv_shared_layers})
-								</span>
-							</div>
-						</CardContent>
-					</Card>
-
-					<Card className="bg-slate-900/40 border-amber-500/20">
-						<CardContent className="p-4 text-[11px] text-slate-400 leading-relaxed flex gap-2">
-							<Info className="h-4 w-4 text-amber-400 shrink-0 mt-px" />
-							<span>
-								Generation currently runs through llama.cpp, which memory-maps the
-								full GGUF file. The O_DIRECT sequential layer streamer in{" "}
-								<span className="font-mono text-slate-300">c/streaming_io.c</span> is
-								built but not yet wired into the token path, so per-layer streaming
-								state is not reported here.
-							</span>
-						</CardContent>
-					</Card>
-				</>
-			)}
-		</div>
+	const layers = report?.layer_report?.layers ?? [];
+	const maxBytes = useMemo(
+		() => layers.reduce((m, l) => Math.max(m, l.nbytes), 1),
+		[layers],
 	);
-}
+	const msByLayer = useMemo(() => {
+		const map = new Map<number, number>();
+		bench?.layers.forEach((l) => {
+			if (l.ok && l.ms !== undefined) map.set(l.layer, l.ms);
+		});
+		return map;
+	}, [bench]);
+	const maxMs = useMemo(
+		() => Math.max(1, ...Array.from(msByLayer.values())),
+		[msByLayer],
+	);
 
-function Row({ label, value }: { label: string; value: string }) {
+	const lr = report?.layer_report;
+
 	return (
-		<div className="flex justify-between">
-			<span className="text-slate-400">{label}:</span>
-			<span className="text-slate-100 font-semibold">{value}</span>
+		<div className="h-full overflow-y-auto bg-slate-950 p-6">
+			<div className="mx-auto max-w-6xl space-y-6">
+				<header>
+					<h1 className="flex items-center gap-2 text-2xl font-semibold text-slate-100">
+						<Layers className="h-6 w-6 text-cyan-400" />
+						Weight Layout & Streaming
+					</h1>
+					<p className="mt-1 text-sm text-slate-400">
+						Read from the GGUF tensor directory. Every offset, size and
+						quantisation below is a value in the file, not an estimate.
+					</p>
+				</header>
+
+				{!lr && (
+					<div className="rounded-lg border border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-400">
+						{report?.layer_report_error
+							? `Could not read the GGUF: ${report.layer_report_error}`
+							: "No GGUF model is active. Download or select one from the sidebar."}
+					</div>
+				)}
+
+				{lr && (
+					<>
+						{/* --- what is in the file ------------------------------- */}
+						<section className="rounded-lg border border-slate-800 bg-slate-900/40 p-5">
+							<div className="mb-4 flex items-center gap-2">
+								<FileBox className="h-4 w-4 text-slate-500" />
+								<h2 className="text-sm font-semibold text-slate-200">
+									{lr.file}
+								</h2>
+								<span className="rounded bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-400">
+									{lr.architecture} · GGUF v{lr.gguf_version}
+								</span>
+							</div>
+							<div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-5">
+								<Figure
+									label="Blocks"
+									value={String(lr.n_layers)}
+									hint={
+										lr.block_count_meta === lr.n_layers
+											? "matches file metadata"
+											: `metadata says ${lr.block_count_meta}`
+									}
+								/>
+								<Figure label="Tensors" value={String(lr.n_tensors)} />
+								<Figure
+									label="Streamable"
+									value={fmtBytes(lr.layer_bytes_total)}
+									hint="all blocks"
+								/>
+								<Figure
+									label="Resident"
+									value={fmtBytes(lr.resident_bytes)}
+									hint="embeddings, norms"
+								/>
+								<Figure label="File" value={fmtBytes(lr.file_size)} />
+							</div>
+
+							<div className="mt-5">
+								<div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+									Quantisation
+								</div>
+								<div className="flex h-2 overflow-hidden rounded">
+									{lr.quant_summary.map((q) => (
+										<div
+											key={q.type}
+											className={QUANT_COLORS[q.type] ?? "bg-slate-600"}
+											style={{ width: `${(q.bytes / lr.file_size) * 100}%` }}
+											title={`${q.type}: ${fmtBytes(q.bytes)} across ${q.tensors} tensors`}
+										/>
+									))}
+								</div>
+								<div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+									{lr.quant_summary.map((q) => (
+										<div
+											key={q.type}
+											className="flex items-center gap-1.5 text-[11px] text-slate-400">
+											<span
+												className={`h-2 w-2 rounded-sm ${QUANT_COLORS[q.type] ?? "bg-slate-600"}`}
+											/>
+											<span className="text-slate-300">{q.type}</span>
+											<span className="tabular-nums">{fmtBytes(q.bytes)}</span>
+										</div>
+									))}
+								</div>
+							</div>
+						</section>
+
+						{/* --- measurement --------------------------------------- */}
+						<section className="rounded-lg border border-slate-800 bg-slate-900/40 p-5">
+							<div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+								<div>
+									<h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+										<Gauge className="h-4 w-4 text-amber-400" />
+										O_DIRECT streaming
+									</h2>
+									<p className="mt-1 text-xs text-slate-500">
+										Reads each block&apos;s real byte range, bypassing the page
+										cache. Moves {fmtBytes(lr.layer_bytes_total)} from disk.
+									</p>
+								</div>
+								<Button
+									onClick={startBenchmark}
+									disabled={running}
+									className="bg-amber-600 text-slate-950 hover:bg-amber-500">
+									{running ? (
+										<>
+											<Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+											Streaming…
+										</>
+									) : (
+										<>
+											<Play className="mr-1.5 h-4 w-4" />
+											Measure
+										</>
+									)}
+								</Button>
+							</div>
+
+							{benchError && (
+								<div className="mb-4 flex items-start gap-2 rounded border border-red-500/30 bg-red-950/40 p-3 text-xs text-red-300">
+									<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+									<span>{benchError}</span>
+								</div>
+							)}
+
+							{bench ? (
+								<div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-5">
+									<Figure
+										label="Throughput"
+										value={bench.mb_per_s.toFixed(0)}
+										unit="MB/s"
+										hint={bench.o_direct ? "O_DIRECT" : "buffered fallback"}
+									/>
+									<Figure
+										label="Per block"
+										value={bench.layer_ms_mean?.toFixed(1) ?? "—"}
+										unit="ms"
+										hint={
+											bench.layer_ms_min !== undefined
+												? `${bench.layer_ms_min.toFixed(0)}–${bench.layer_ms_max?.toFixed(0)} ms`
+												: undefined
+										}
+									/>
+									<Figure
+										label="Blocks read"
+										value={String(bench.layers_read)}
+										hint={bench.failures ? `${bench.failures} failed` : "no failures"}
+									/>
+									<Figure
+										label="Total"
+										value={(bench.total_ms / 1000).toFixed(2)}
+										unit="s"
+										hint={fmtBytes(bench.total_bytes)}
+									/>
+									<Figure
+										label="If streamed"
+										value={bench.seconds_per_token_if_streamed?.toFixed(2) ?? "—"}
+										unit="s/token"
+										hint="every block, per token"
+									/>
+								</div>
+							) : (
+								<p className="text-xs text-slate-500">
+									Not measured yet.
+								</p>
+							)}
+
+							{bench?.seconds_per_token_if_streamed ? (
+								<p className="mt-4 border-t border-slate-800 pt-4 text-xs leading-relaxed text-slate-400">
+									At the measured {bench.mb_per_s.toFixed(0)} MB/s, streaming
+									every block for each token would cost{" "}
+									<span className="text-amber-400">
+										{bench.seconds_per_token_if_streamed.toFixed(2)}s per token
+									</span>{" "}
+									— about{" "}
+									{(1 / bench.seconds_per_token_if_streamed).toFixed(2)} tok/s.
+									Generation currently runs through llama.cpp, which memory-maps
+									the file and keeps the weights resident instead. That is the
+									trade the RAM ceiling would buy.
+								</p>
+							) : null}
+						</section>
+
+						{/* --- the map ------------------------------------------- */}
+						<section className="rounded-lg border border-slate-800 bg-slate-900/40 p-5">
+							<div className="mb-3 flex items-center gap-2">
+								<HardDriveDownload className="h-4 w-4 text-slate-500" />
+								<h2 className="text-sm font-semibold text-slate-200">
+									Block map
+								</h2>
+								<span className="text-[11px] text-slate-500">
+									bar = byte span
+									{msByLayer.size > 0 && " · amber = measured read time"}
+								</span>
+							</div>
+							<div className="flex items-center gap-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
+								<div className="w-10 shrink-0 text-right">Blk</div>
+								<div className="flex-1">Span</div>
+								<div className="w-16 shrink-0 text-right">Size</div>
+								<div className="w-16 shrink-0 text-right">Read</div>
+								<div className="hidden w-40 shrink-0 lg:block">Offset</div>
+							</div>
+							<div className="divide-y divide-slate-800/50">
+								{layers.map((l) => (
+									<LayerRow
+										key={l.layer}
+										layer={l}
+										maxBytes={maxBytes}
+										measuredMs={msByLayer.get(l.layer)}
+										maxMs={maxMs}
+									/>
+								))}
+							</div>
+							{layers[0] && (
+								<p className="mt-4 border-t border-slate-800 pt-4 text-[11px] leading-relaxed text-slate-500">
+									Each block holds {layers[0].tensor_count} tensors. Block data
+									begins at {fmtHex(layers[0].offset)} — the{" "}
+									{fmtBytes(layers[0].offset)} before it is the token embedding
+									tables, which stay resident rather than streaming.
+								</p>
+							)}
+						</section>
+					</>
+				)}
+			</div>
 		</div>
 	);
 }

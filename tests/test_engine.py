@@ -67,18 +67,38 @@ def test_c_engine():
     if not os.path.exists(ENGINE_BIN):
         check("engine binary present", False, "c/vapor_engine not built (run: make -C c)")
         return
+    # The engine is a streaming inspector: it takes a GGUF and a plan file of
+    # real byte ranges. Invoked without them it must print usage and exit
+    # non-zero rather than pretending to have generated anything.
     try:
-        out = subprocess.check_output(
-            [ENGINE_BIN, os.path.join(HERE, "c", "vapor_engine.c"), "Unit Test"],
-            stderr=subprocess.STDOUT, timeout=60).decode()
-        check("engine executes", "VaporRAM" in out or "Gemma" in out, "unexpected output")
+        proc = subprocess.run([ENGINE_BIN], capture_output=True, timeout=60)
+        combined = (proc.stdout + proc.stderr).decode()
+        check("engine reports usage without arguments",
+              proc.returncode != 0 and "plan-file" in combined,
+              f"exit {proc.returncode}: {combined[:80]}")
+        check("engine identifies itself", "VaporRAM" in combined, combined[:80])
+
+        # A one-layer plan over the engine's own source: exercises the read
+        # path without needing model weights present.
+        src = os.path.join(HERE, "c", "vapor_engine.c")
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = os.path.join(tmp, "plan.txt")
+            size = min(4096, os.path.getsize(src))
+            with open(plan, "w") as f:
+                f.write(f"0 0 {size}\n")
+            proc = subprocess.run([ENGINE_BIN, src, plan],
+                                  capture_output=True, timeout=60)
+            out = proc.stdout.decode()
+            check("engine streams a planned range and reports JSON",
+                  '"event":"done"' in out and '"failures":0' in out,
+                  out[:120] or proc.stderr.decode()[:120])
     except OSError as e:
         if e.errno == 8:
             print("   \033[33m~\033[0m skipped (foreign binary format on this host)")
         else:
             check("engine executes", False, str(e))
-    except subprocess.CalledProcessError as e:
-        check("engine executes", False, f"exit {e.returncode}")
+    except subprocess.TimeoutExpired:
+        check("engine executes", False, "timed out")
 
 
 def test_launcher_executable():
@@ -366,6 +386,85 @@ def test_performance_settings():
     check("no preset injects a fake <|think|> token", not bad, str(bad))
 
 
+def test_gguf_and_streaming():
+    """GGUF parsing and the real streaming path."""
+    print("\n\033[1;36m[11] GGUF Layout & O_DIRECT Streaming\033[0m")
+    from vapor_ram import gguf, cortex, openai_server
+
+    model = openai_server.find_gguf(openai_server.current_model_path)
+    if not model:
+        check("gguf parser raises on a missing file", True, "no weights present")
+        return
+
+    parsed = gguf.read_gguf(model)
+    check("GGUF magic and version accepted", parsed["version"] in (2, 3),
+          str(parsed["version"]))
+    check("architecture read from metadata", bool(parsed["architecture"]),
+          str(parsed["architecture"]))
+    check("tensor directory is fully parsed",
+          len(parsed["tensors"]) == parsed["n_tensors"],
+          f"{len(parsed['tensors'])} != {parsed['n_tensors']}")
+
+    # The decisive correctness check: if every quantisation block size is
+    # right, the last tensor ends exactly at the end of the file.
+    end = max(t["offset"] + t["nbytes"] for t in parsed["tensors"])
+    check("tensor sizes account for the whole file exactly",
+          end == parsed["file_size"], f"{end} vs {parsed['file_size']}")
+    check("no tensor starts before the data section",
+          all(t["offset"] >= parsed["data_start"] for t in parsed["tensors"]))
+
+    mapping = gguf.layer_map(parsed)
+    meta_blocks = parsed["metadata"].get(f"{parsed['architecture']}.block_count")
+    check("block count matches file metadata",
+          meta_blocks is None or mapping["n_layers"] == meta_blocks,
+          f"{mapping['n_layers']} vs {meta_blocks}")
+    check("every block carries tensors",
+          all(l["tensor_count"] > 0 for l in mapping["layers"]))
+    check("blocks are ordered and non-overlapping",
+          all(mapping["layers"][i]["offset"] + mapping["layers"][i]["nbytes"]
+              <= mapping["layers"][i + 1]["offset"]
+              for i in range(len(mapping["layers"]) - 1)))
+
+    # The bug this replaced: a fixed 140 MB stride from byte 0.
+    first = mapping["layers"][0]
+    check("block 0 does not start at byte 0 (the old fixed-stride assumption)",
+          first["offset"] > 0, str(first["offset"]))
+    check("real block span differs from the old 140 MB constant",
+          abs(first["nbytes"] / (1024 ** 2) - 140) > 1,
+          f"{first['nbytes'] / 1024 ** 2:.1f} MB")
+
+    report = cortex.layer_report(model)
+    check("cortex reports the same block count",
+          report["n_layers"] == mapping["n_layers"])
+    check("quant summary covers the file",
+          abs(sum(q["bytes"] for q in report["quant_summary"])
+              - sum(t["nbytes"] for t in parsed["tensors"])) == 0)
+    check("layer_buffer_mb is measured, not the 140 constant",
+          openai_server.measured_layer_buffer_mb() != 140)
+
+    engine = os.path.join(HERE, "c", "vapor_engine")
+    if not os.path.isfile(engine):
+        check("streaming inspector present", False, "c/vapor_engine not built")
+        return
+
+    bench = cortex.run_stream_benchmark(model)
+    check("streaming run completed", not bench.get("error"),
+          str(bench.get("message"))[:120])
+    if bench.get("error"):
+        return
+    check("all blocks streamed without failure",
+          bench["failures"] == 0 and bench["layers_read"] == mapping["n_layers"],
+          f"read {bench['layers_read']}, {bench['failures']} failed")
+    check("O_DIRECT was actually used", bench["o_direct"] is True)
+    check("measured throughput is plausible",
+          0 < bench["mb_per_s"] < 100000, str(bench.get("mb_per_s")))
+    check("bytes streamed match the planned layer total",
+          bench["total_bytes"] == mapping["layer_bytes_total"],
+          f"{bench['total_bytes']} vs {mapping['layer_bytes_total']}")
+    check("per-token streaming cost is derived from the measurement",
+          bench.get("seconds_per_token_if_streamed", 0) > 0)
+
+
 def test_network_sharing():
     """Authenticated sharing. Runs last: enabling auth flips module-level state
     that every other server in this process shares."""
@@ -534,6 +633,7 @@ def main():
     test_concurrency_and_assets(port)
     test_generation_without_weights(port)
     test_performance_settings()
+    test_gguf_and_streaming()
     test_network_sharing()
 
     print("\n" + "=" * 60)

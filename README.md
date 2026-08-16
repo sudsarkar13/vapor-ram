@@ -2,9 +2,11 @@
 
 **VaporRAM** is a local inference server, CLI and web dashboard for **google/gemma-4-E4B-it**, packaged for consumer hardware.
 
-Its goal is to run the model under a **1.5 GB RAM ceiling** by streaming transformer layers directly from NVMe SSD storage. That streaming engine — unbuffered `O_DIRECT` reads with kernel prefetch hints and an int8 quantised KV cache — is implemented in pure C under [`c/`](c/).
+Its goal is to run the model under a **1.5 GB RAM ceiling** by streaming transformer layers directly from NVMe SSD storage. The streaming reader — unbuffered `O_DIRECT` reads with aligned double buffers and kernel prefetch hints — is implemented in pure C under [`c/`](c/).
 
-> **Current status (alpha):** token generation runs through **llama.cpp**, which memory-maps the full GGUF file. The C layer streamer is built but not yet wired into the token path, so the RAM ceiling is **not yet achieved** — measured RSS with the Q4_K_M weights is roughly **6 GB**. The dashboard reports real measured RSS, so you can see this for yourself. Connecting the streaming engine to generation is the primary remaining work.
+> **Current status (alpha):** token generation runs through **llama.cpp**, which memory-maps the full GGUF file, so the RAM ceiling is **not achieved** — measured RSS with the Q4_K_M weights is 6.8–8.1 GB depending on context size.
+>
+> The C streamer now reads the **real** byte ranges of each transformer block, resolved from the GGUF tensor directory, and the dashboard reports measured throughput for them. It is a measurement path, not the token path. Running it on this model gives a number worth knowing before going further: at a measured **~990 MB/s** under `O_DIRECT`, streaming all 42 blocks for every token would cost **~2.5 s/token (~0.4 tok/s)**, against **6.8 tok/s** with the weights resident. Trading roughly 17x throughput is what the 1.5 GB ceiling would cost on this hardware.
 
 [![PyPI version](https://img.shields.io/pypi/v/vapor-ram.svg)](https://pypi.org/project/vapor-ram/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/vapor-ram?color=06b6d4&style=flat-square)](https://pypi.org/project/vapor-ram/)
@@ -213,6 +215,24 @@ You can customize execution using presets or flags:
 | `./vapor stop` | Stop a running server from another terminal |
 | `./vapor lan` | Show this machine's LAN address |
 
+### Weight Layout & Streaming
+
+The **Brain Cortex** tab reads the GGUF tensor directory directly, so every
+figure it shows is a value in the file rather than an estimate. For
+`gemma-4-E4B-it-Q4_K_M`:
+
+| | |
+| --- | ---: |
+| Transformer blocks | 42 (matches the file's own `block_count`) |
+| Tensors | 720 |
+| Block data begins at | byte 2,386,145,088 |
+| Per-block span | ~61 MB |
+| Streamable (all blocks) | 2.41 GB |
+| Resident (embeddings, norms) | 2.21 GB |
+
+Press **Measure** to stream those real ranges through `O_DIRECT`, bypassing the
+page cache. On an NVMe SSD this reports ~990 MB/s and ~59 ms per block.
+
 ### Performance
 
 Measured on a Ryzen 7 5700U (8 physical cores / 16 threads, 15 GB RAM) with
@@ -262,7 +282,9 @@ all.
 
 ## Project Structure
 
-- `c/vapor_engine`: Compiled C SIMD inference engine binary.
+- `c/vapor_engine`: Streaming inspector. Given a GGUF and a plan of byte ranges, streams them through the `O_DIRECT` reader and reports measured per-block timings as JSON. It does not generate tokens.
+- `vapor_ram/gguf.py`: GGUF container parser — tensor directory, shapes, quantisation types and exact byte ranges.
+- `vapor_ram/cortex.py`: Resolves real layer ranges from the GGUF and drives the inspector.
 - [vapor](file:///home/sudeepta/Ubuntu-Owner/GitHub/vapor-ram/vapor): Main Python CLI frontend launcher.
 - [doctor.py](file:///home/sudeepta/Ubuntu-Owner/GitHub/vapor-ram/doctor.py): Installation and hardware diagnostic script.
 - [openai_server.py](file:///home/sudeepta/Ubuntu-Owner/GitHub/vapor-ram/openai_server.py): OpenAI-compatible HTTP API server implementation.

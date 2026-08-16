@@ -122,6 +122,85 @@ export interface DoctorReport extends Telemetry {
 	text: string;
 }
 
+export interface LayerTensor {
+	name: string;
+	dims: number[];
+	type: string;
+	offset: number;
+	nbytes: number;
+}
+
+export interface GgufLayer {
+	layer: number;
+	offset: number;
+	nbytes: number;
+	tensor_count: number;
+	quant_types: string[];
+	tensors: LayerTensor[];
+}
+
+export interface QuantSummary {
+	type: string;
+	tensors: number;
+	bytes: number;
+}
+
+/** Read from the GGUF tensor directory — every field is in the file. */
+export interface LayerReport {
+	file: string;
+	architecture: string | null;
+	gguf_version: number;
+	file_size: number;
+	data_start: number;
+	n_tensors: number;
+	n_layers: number;
+	layer_bytes_total: number;
+	resident_bytes: number;
+	resident_tensors: LayerTensor[];
+	layers: GgufLayer[];
+	quant_summary: QuantSummary[];
+	block_count_meta: number | null;
+}
+
+export interface StreamLayerResult {
+	layer: number;
+	ok: boolean;
+	bytes?: number;
+	ms?: number;
+	mb_per_s?: number;
+}
+
+/** Measured by streaming the real byte ranges through O_DIRECT. */
+export interface StreamBenchmark {
+	measured_at: number;
+	o_direct: boolean | null;
+	layers: StreamLayerResult[];
+	layers_read: number;
+	failures: number;
+	total_bytes: number;
+	total_ms: number;
+	mb_per_s: number;
+	peak_buffer_bytes: number;
+	layer_ms_min?: number;
+	layer_ms_max?: number;
+	layer_ms_mean?: number;
+	seconds_per_token_if_streamed?: number;
+	stderr?: string | null;
+}
+
+export interface CortexReport extends Telemetry {
+	status: string;
+	version: string;
+	model: string;
+	backend: string;
+	kv_slots: number;
+	ram_usage_percent: number | null;
+	timings: GenerationTimings;
+	layer_report: LayerReport | null;
+	layer_report_error: string | null;
+	stream_benchmark: StreamBenchmark | null;
+}
+
 export interface GenerationTimings {
 	wall_time_ms?: number;
 	first_token_ms?: number | null;
@@ -256,6 +335,16 @@ export const fetchServerConfig = () =>
 	getJson<ServerConfig>("/v1/system/config", "config fetch");
 
 export const fetchDoctor = () => getJson<DoctorReport>("/v1/doctor", "doctor");
+
+export const fetchCortex = () => getJson<CortexReport>("/v1/cortex", "cortex");
+
+/** Streams gigabytes through O_DIRECT — only ever on an explicit request. */
+export const runStreamBenchmark = () =>
+	postJson<{ status?: string; stream_benchmark?: StreamBenchmark; error?: string; message?: string }>(
+		"/v1/cortex/benchmark",
+		{},
+		"stream benchmark",
+	);
 
 export async function fetchPresets(): Promise<VaporPreset[]> {
 	const res = await getJson<{ data: VaporPreset[] }>("/v1/presets", "presets");
