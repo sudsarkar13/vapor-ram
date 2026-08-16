@@ -131,6 +131,10 @@ def main():
     download_parser = subparsers.add_parser("download", help="Download google/gemma-4-E4B-it weights")
     download_parser.add_argument("--repo", default="google/gemma-4-E4B-it", help="Hugging Face repo ID")
     download_parser.add_argument("--dest", default=paths.default_model_dir(), help="Destination directory")
+    download_parser.add_argument("--mmproj", action="store_true",
+        help="Also download the multimodal projector (~990 MB) for image and audio input")
+    download_parser.add_argument("--mmproj-only", dest="mmproj_only", action="store_true",
+        help="Download only the projector, when the weights are already present")
 
     run_parser = subparsers.add_parser("run", help="One-shot prompt generation")
     run_parser.add_argument("prompt", nargs="+", help="Prompt text")
@@ -271,7 +275,10 @@ def main():
     elif args.command == "download":
         paths.ensure_tools_importable()
         import download_model
-        download_model.download_model(args.repo, args.dest)
+        sys.exit(download_model.download_model(
+            args.repo, args.dest,
+            mmproj=getattr(args, "mmproj", False),
+            mmproj_only=getattr(args, "mmproj_only", False)) or 0)
 
     elif args.command == "lan":
         local_ip = get_local_ip()

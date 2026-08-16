@@ -37,13 +37,8 @@ C = {"dim": "\033[90m", "cyan": "\033[36m", "green": "\033[32m",
 
 
 def _find_gguf():
-    model_dir = paths.default_model_dir()
-    if not os.path.isdir(model_dir):
-        return None
-    for name in sorted(os.listdir(model_dir)):
-        if name.endswith(".gguf"):
-            return os.path.join(model_dir, name)
-    return None
+    """Model weights only — a projector is not something to stream-benchmark."""
+    return paths.find_model_gguf(paths.default_model_dir())
 
 
 def run_benchmark():

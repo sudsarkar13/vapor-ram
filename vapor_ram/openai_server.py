@@ -567,18 +567,42 @@ def weights_available(path):
 
 
 def find_gguf(path):
-    """Resolve a model path to a concrete .gguf file, or None."""
+    """Resolve a model path to a concrete .gguf file of model weights, or None.
+
+    Multimodal projectors are also .gguf files and live beside the weights, so
+    they are skipped here: loading one as the model would hand llama.cpp a
+    vision tower and ask it to generate text.
+    """
     if not path or not os.path.exists(path):
         return None
     if os.path.isfile(path):
-        return path if path.endswith(".gguf") else None
+        if not path.endswith(".gguf") or paths.is_mmproj(path):
+            return None
+        return path
+    return paths.find_model_gguf(path)
+
+
+def mmproj_path():
+    """Path to the multimodal projector, or None when it is not installed."""
+    gguf = find_gguf(current_model_path)
+    directory = os.path.dirname(gguf) if gguf else current_model_path
+    return paths.find_mmproj(directory)
+
+
+def multimodal_ready():
+    """True when media input can actually be processed.
+
+    Needs both halves: a projector file on disk, and a runtime that can use it.
+    Reporting readiness on the file alone would let a request through to a
+    library that cannot honour it.
+    """
+    if not mmproj_path():
+        return False
     try:
-        for f in sorted(os.listdir(path)):
-            if f.endswith(".gguf"):
-                return os.path.join(path, f)
-    except OSError:
-        pass
-    return None
+        from llama_cpp.llama_chat_format import Gemma4ChatHandler  # noqa: F401
+    except Exception:
+        return False
+    return True
 
 
 def weights_format(gguf_path=None):
@@ -831,6 +855,71 @@ THOUGHT_CHANNEL = "thought"
 STOP_SEQUENCES = [TURN_CLOSE, TURN_OPEN]
 
 
+# Media control tokens. All three are real single tokens in this model's
+# vocabulary, verified against it rather than assumed:
+#   <|image|> 258880   <|audio|> 258881   <|video|> 258884
+# The model's own chat template maps OpenAI content parts onto exactly these,
+# so VaporRAM's hand-built prompt uses the same mapping.
+IMAGE_TOKEN = "<|image|>"
+AUDIO_TOKEN = "<|audio|>"
+VIDEO_TOKEN = "<|video|>"
+
+# OpenAI content-part `type` values -> the token that stands in for that part.
+MEDIA_PART_TOKENS = {
+    "image": IMAGE_TOKEN,
+    "image_url": IMAGE_TOKEN,
+    "input_image": IMAGE_TOKEN,
+    "audio": AUDIO_TOKEN,
+    "input_audio": AUDIO_TOKEN,
+    "video": VIDEO_TOKEN,
+    "input_video": VIDEO_TOKEN,
+}
+
+
+def render_content(content):
+    """Flatten an OpenAI `content` value to prompt text, and report its media.
+
+    Returns `(text, media)` where `media` lists the part types encountered.
+
+    `content` is either a plain string or an array of typed parts. It used to
+    be passed through `str()`, which turned an array into a Python dict repr --
+    base64 payload and all -- and fed it to the model as prose. The model saw
+    literal "[{'type': 'image_url', ...}]" and answered confidently about
+    nothing.
+    """
+    if content is None:
+        return "", []
+    if isinstance(content, str):
+        return content, []
+    if not isinstance(content, (list, tuple)):
+        return str(content), []
+
+    pieces, media = [], []
+    for part in content:
+        if isinstance(part, str):
+            pieces.append(part)
+            continue
+        if not isinstance(part, dict):
+            continue
+        ptype = part.get("type")
+        if ptype in ("text", "input_text") or (ptype is None and "text" in part):
+            pieces.append(str(part.get("text", "")))
+        elif ptype in MEDIA_PART_TOKENS:
+            pieces.append(MEDIA_PART_TOKENS[ptype])
+            media.append(ptype)
+    return "\n".join(p for p in pieces if p), media
+
+
+def message_media(messages):
+    """Every media part type across a conversation, in order of appearance."""
+    found = []
+    for msg in messages or []:
+        _, media = render_content(msg.get("content"))
+        found.extend(media)
+    return found
+
+
+
 def strip_thinking(text):
     """Drop <|channel>...<channel|> blocks, mirroring the chat template's macro.
 
@@ -956,7 +1045,7 @@ def build_prompt(messages, preset, enable_thinking=None, effort=None):
         system_parts.append(preset["system_instruction"])
     for msg in messages:
         if msg.get("role") == "system":
-            content = str(msg.get("content", "")).strip()
+            content = render_content(msg.get("content"))[0].strip()
             # Skip the "Preset: x" marker; it is routing metadata, not an instruction.
             if content and not re.match(r"^\s*preset\s*:\s*\S+\s*$", content, re.I):
                 system_parts.append(content)
@@ -968,7 +1057,7 @@ def build_prompt(messages, preset, enable_thinking=None, effort=None):
     rendered = []
     total = sum(len(p) for p in system_parts)
     for msg in reversed(turns):
-        content = str(msg.get("content", "")).strip()
+        content = render_content(msg.get("content"))[0].strip()
         if msg["role"] == "assistant":
             content = strip_thinking(content)
         if not content:
@@ -1333,6 +1422,14 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 "active_model": MODEL_ID,
                 "format": weights_format(gguf),
                 "connection": "CONNECTED" if tele["model_available"] else "NO_WEIGHTS",
+                # Clients need to know before sending a 990 MB image whether it
+                # can be looked at. Both halves are reported, so a missing
+                # projector is distinguishable from a runtime that lacks support.
+                "multimodal": {
+                    "ready": multimodal_ready(),
+                    "projector": os.path.basename(mmproj_path()) if mmproj_path() else None,
+                    "accepts": ["image", "audio", "video"] if multimodal_ready() else [],
+                },
             }
             # /health stays reachable without a key so a client can confirm it
             # found the right machine, but the telemetry block carries the host's
@@ -1768,6 +1865,23 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
 
         want_effort = resolve_effort(
             payload.get("reasoning_effort") or payload.get("thinking_level"))
+
+        # Media parts need the multimodal projector. Without it the prompt would
+        # still carry <|image|>, and the model would answer confidently about an
+        # image it was never shown. Refuse, and say how to fix it.
+        media = message_media(messages)
+        if media and not multimodal_ready():
+            kinds = sorted({("audio" if "audio" in m else
+                             "video" if "video" in m else "image") for m in media})
+            return self._send_json({
+                "error": "Multimodal input not available",
+                "message": (
+                    f"This request contains {', '.join(kinds)} input, but the multimodal "
+                    "projector is not installed, so the model cannot see it. "
+                    "Install it with: vapor download --mmproj"),
+                "media_types": kinds,
+                "projector_installed": False,
+            }, status=400)
 
         response_id = f"gen-{int(time.time() * 1000)}"
 

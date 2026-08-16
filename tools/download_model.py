@@ -20,6 +20,14 @@ import os, sys, json, time, shutil, subprocess, urllib.request, urllib.error
 REPO_ID = "unsloth/gemma-4-E4B-it-GGUF"
 FILENAME = "gemma-4-E4B-it-Q4_K_M.gguf"
 
+# Multimodal projector ("mmproj"): the vision and audio towers, which the base
+# GGUF does not contain. Without it the model is text-only. F16 is the default
+# because it is the smallest practical build (~990 MB; F32 is ~1.9 GB) and is
+# what llama.cpp's MTMD runtime expects.
+MMPROJ_FILENAME = "mmproj-F16.gguf"
+MMPROJ_ALTERNATIVES = ("mmproj-BF16.gguf", "mmproj-F32.gguf")
+MIN_VALID_MMPROJ_BYTES = 50 * 1024 * 1024
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TARGET_DIR = os.path.join(HERE, "models", "gemma-4-E4B-it")
 
@@ -167,6 +175,70 @@ def fetch_config_json(dest_dir, progress_callback=None):
         sys.stderr.write(f"[!] Warning fetching config.json: {e}\n")
 
 
+def _is_mmproj(filename):
+    name = os.path.basename(filename).lower()
+    return name.endswith(".gguf") and any(
+        m in name for m in ("mmproj", "mm-proj", "projector"))
+
+
+def existing_mmproj(dest_dir):
+    """Path to an already-downloaded projector in `dest_dir`, or None."""
+    if not os.path.isdir(dest_dir):
+        return None
+    for f in sorted(os.listdir(dest_dir)):
+        if _is_mmproj(f):
+            full = os.path.join(dest_dir, f)
+            if os.path.getsize(full) > MIN_VALID_MMPROJ_BYTES:
+                return full
+    return None
+
+
+def download_mmproj(progress_callback=None, repo_id=None, dest_dir=None, filename=None):
+    """Download the multimodal projector. Returns its path, or None on failure.
+
+    Kept separate from the weights download because it is a large optional
+    extra: text generation works without it, and a user who only wants text
+    should not pay ~990 MB for a vision tower they will not use.
+    """
+    repo_id = repo_id or REPO_ID
+    dest_dir = os.path.abspath(dest_dir or TARGET_DIR)
+    os.makedirs(dest_dir, exist_ok=True)
+
+    already = existing_mmproj(dest_dir)
+    if already:
+        size_mb = os.path.getsize(already) / (1024 * 1024)
+        _emit(progress_callback, 100,
+              f"Projector already present: {os.path.basename(already)}",
+              size_mb, size_mb, 0.0)
+        return already
+
+    candidates = [filename] if filename else [MMPROJ_FILENAME, *MMPROJ_ALTERNATIVES]
+    for name in candidates:
+        url = resolve_url(repo_id, name)
+        target_path = os.path.join(dest_dir, name)
+        _emit(progress_callback, 0, f"Resolving {repo_id}/{name}…")
+
+        for strategy in (
+            lambda: download_resumable(url, target_path, progress_callback),
+            lambda: bool(shutil.which("curl")) and download_with_curl(
+                url, target_path, progress_callback),
+            lambda: download_with_hf_hub(repo_id, name, dest_dir, progress_callback),
+        ):
+            result = strategy()
+            if not result:
+                continue
+            final = result if isinstance(result, str) else target_path
+            if os.path.getsize(final) <= MIN_VALID_MMPROJ_BYTES:
+                continue
+            size_mb = os.path.getsize(final) / (1024 * 1024)
+            _emit(progress_callback, 100,
+                  f"Projector ready: {os.path.basename(final)}", size_mb, size_mb, 0.0)
+            return final
+
+    _emit(progress_callback, 0, "Could not download the multimodal projector")
+    return None
+
+
 def run_full_download(progress_callback=None, repo_id=None, dest_dir=None, filename=None):
     """Download GGUF weights. Returns the final .gguf path, or None on failure.
 
@@ -180,9 +252,10 @@ def run_full_download(progress_callback=None, repo_id=None, dest_dir=None, filen
     os.makedirs(dest_dir, exist_ok=True)
     fetch_config_json(dest_dir, progress_callback)
 
-    # Already have usable weights?
+    # Already have usable weights? A projector is also a .gguf of comparable
+    # size, so it must not satisfy this check.
     for existing in sorted(os.listdir(dest_dir)):
-        if existing.endswith(".gguf"):
+        if existing.endswith(".gguf") and not _is_mmproj(existing):
             full = os.path.join(dest_dir, existing)
             if os.path.getsize(full) > MIN_VALID_GGUF_BYTES:
                 size_mb = os.path.getsize(full) / (1024 * 1024)
@@ -226,8 +299,12 @@ def run_full_download(progress_callback=None, repo_id=None, dest_dir=None, filen
     return None
 
 
-def download_model(repo, dest):
-    """CLI entry point used by `./vapor download`."""
+def download_model(repo, dest, mmproj=False, mmproj_only=False):
+    """CLI entry point used by `vapor download`.
+
+    `mmproj` additionally fetches the multimodal projector; `mmproj_only`
+    fetches it alone, for someone who already has the weights.
+    """
     def log_cb(pct, msg, dn=0.0, tot=0.0, speed=0.0):
         bar_width = 32
         filled = int(bar_width * pct / 100)
@@ -236,15 +313,32 @@ def download_model(repo, dest):
         sys.stdout.flush()
 
     print(f"=== VaporRAM Model Downloader ===\n  Repo: {repo}\n  Dest: {dest}\n")
-    result = run_full_download(log_cb, repo_id=repo if repo != "google/gemma-4-E4B-it" else None,
-                               dest_dir=dest)
-    print()
-    if result:
-        print(f"\n[✓] Weights ready at {result}")
-        return 0
-    print("\n[!] Download failed.")
-    return 1
+    repo_arg = repo if repo != "google/gemma-4-E4B-it" else None
 
+    result = None
+    if not mmproj_only:
+        result = run_full_download(log_cb, repo_id=repo_arg, dest_dir=dest)
+        print()
+        if result:
+            print(f"\n[✓] Weights ready at {result}")
+        else:
+            print("\n[!] Download failed.")
+            return 1
+
+    if mmproj or mmproj_only:
+        print("\n  Multimodal projector (vision + audio towers, ~990 MB)")
+        proj = download_mmproj(log_cb, repo_id=repo_arg, dest_dir=dest)
+        print()
+        if proj:
+            print(f"\n[✓] Projector ready at {proj}")
+        else:
+            print("\n[!] Projector download failed. Text generation is unaffected.")
+            return 1 if mmproj_only else 0
+    elif result:
+        print("\n  Text-only. For image and audio input, add the projector:")
+        print("    vapor download --mmproj")
+
+    return 0
 
 if __name__ == "__main__":
     sys.exit(download_model(REPO_ID, TARGET_DIR))

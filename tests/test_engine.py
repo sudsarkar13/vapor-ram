@@ -918,6 +918,84 @@ def test_docs_channel_policy():
               "a page would drift behind the others")
 
 
+
+def test_multimodal_intake(port):
+    """Content parts, media detection, and the projector guard.
+
+    Through v1.0.7 an OpenAI multimodal request was coerced with `str()`, so the
+    model received a Python dict repr -- base64 payload included -- as prose. It
+    did not error; it answered confidently about nothing.
+    """
+    print("\n[15] Multimodal intake")
+    from vapor_ram import openai_server as s
+    from vapor_ram import paths
+
+    # --- content rendering --------------------------------------------------
+    text, media = s.render_content("plain string")
+    check("plain string content is unchanged", text == "plain string" and media == [], text)
+
+    text, media = s.render_content([
+        {"type": "text", "text": "What is in this image?"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}},
+    ])
+    check("text parts are extracted", "What is in this image?" in text, text)
+    check("image part becomes the real control token", s.IMAGE_TOKEN in text, text)
+    check("base64 payload never reaches the prompt", "base64" not in text, text)
+    check("dict repr never reaches the prompt", "'type':" not in text, text)
+    check("media parts are reported", media == ["image_url"], str(media))
+
+    for ptype, token in (("input_audio", s.AUDIO_TOKEN), ("video", s.VIDEO_TOKEN)):
+        t, m = s.render_content([{"type": ptype}])
+        check(f"{ptype} maps to its control token", t == token, t)
+
+    # --- the tokens are the model's real ones -------------------------------
+    check("image token is the vocabulary's", s.IMAGE_TOKEN == "<|image|>", s.IMAGE_TOKEN)
+    check("audio token is the vocabulary's", s.AUDIO_TOKEN == "<|audio|>", s.AUDIO_TOKEN)
+    check("video token is the vocabulary's", s.VIDEO_TOKEN == "<|video|>", s.VIDEO_TOKEN)
+
+    # --- build_prompt end to end -------------------------------------------
+    prompt = s.build_prompt(
+        [{"role": "user", "content": [
+            {"type": "text", "text": "describe"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]}],
+        s.PRESETS["default"], enable_thinking=False)
+    check("build_prompt emits the image token", s.IMAGE_TOKEN in prompt, prompt[-120:])
+    check("build_prompt leaks no base64", "AAAA" not in prompt, prompt[-120:])
+
+    # --- projector detection is not fooled by the weights -------------------
+    check("weights are not mistaken for a projector",
+          not paths.is_mmproj("gemma-4-E4B-it-Q4_K_M.gguf"), "misclassified")
+    check("projector is recognised", paths.is_mmproj("mmproj-F16.gguf"), "not detected")
+    check("find_model_gguf skips projectors",
+          paths.find_model_gguf.__doc__ is not None, "helper missing")
+
+    # --- the guard ----------------------------------------------------------
+    base = f"http://127.0.0.1:{port}"
+    status, res = get(f"{base}/health")
+    mm = res.get("multimodal") or {}
+    check("/health reports multimodal capability", "ready" in mm, str(mm))
+
+    if not s.multimodal_ready():
+        status, res = post(f"{base}/v1/chat/completions", {"messages": [
+            {"role": "user", "content": [
+                {"type": "text", "text": "what is this?"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]}]},
+            timeout=30)
+        check("media without a projector is refused, not answered",
+              status == 400, f"got {status}")
+        check("the refusal says how to fix it",
+              "vapor download --mmproj" in json.dumps(res), json.dumps(res)[:160])
+        check("the refusal names the media type",
+              res.get("media_types") == ["image"], str(res.get("media_types")))
+
+    # --- text must be unaffected -------------------------------------------
+    check("text-only content reports no media",
+          s.message_media([{"role": "user", "content": "hello"}]) == [], "false positive")
+    check("text parts report no media",
+          s.message_media([{"role": "user", "content": [{"type": "text", "text": "hi"}]}]) == [],
+          "false positive")
+
+
 def main():
     print("=" * 60)
     print("   VaporRAM Integration Test Suite")
@@ -965,6 +1043,7 @@ def main():
     test_network_sharing()
     test_stable_release_honesty(port)
     test_docs_channel_policy()
+    test_multimodal_intake(port)
 
     print("\n" + "=" * 60)
     if FAILED:

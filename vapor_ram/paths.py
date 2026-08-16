@@ -68,6 +68,47 @@ def engine_bin():
     return _resolve(os.path.join("c", "vapor_engine"))
 
 
+# A multimodal projector ("mmproj") ships as a .gguf sitting in the same
+# directory as the weights, so every "find a .gguf" scan in the project could
+# pick it up and try to generate tokens from a vision tower. These two helpers
+# are the single rule for telling them apart; use them rather than globbing.
+MMPROJ_MARKERS = ("mmproj", "mm-proj", "projector")
+
+
+def is_mmproj(filename):
+    """True when a .gguf is a multimodal projector rather than model weights."""
+    name = os.path.basename(filename).lower()
+    return name.endswith(".gguf") and any(m in name for m in MMPROJ_MARKERS)
+
+
+def find_model_gguf(directory):
+    """First .gguf in `directory` that is model weights, not a projector."""
+    if not directory or not os.path.isdir(directory):
+        return None
+    for f in sorted(os.listdir(directory)):
+        if f.endswith(".gguf") and not is_mmproj(f):
+            return os.path.join(directory, f)
+    return None
+
+
+def find_mmproj(directory=None):
+    """The multimodal projector beside the weights, or None if not downloaded.
+
+    VAPOR_MMPROJ overrides the search, so a projector kept outside the model
+    directory can still be used.
+    """
+    override = os.environ.get("VAPOR_MMPROJ")
+    if override:
+        return override if os.path.isfile(override) else None
+    directory = directory or default_model_dir()
+    if not directory or not os.path.isdir(directory):
+        return None
+    for f in sorted(os.listdir(directory)):
+        if is_mmproj(f):
+            return os.path.join(directory, f)
+    return None
+
+
 def simd_bench_bin():
     """Standalone AVX2/NEON microbenchmark binary (may legitimately be absent).
 

@@ -32,8 +32,7 @@ def _gguf_geometry():
     model_dir = paths.default_model_dir()
     if not os.path.isdir(model_dir):
         return None
-    gguf = next((os.path.join(model_dir, f) for f in sorted(os.listdir(model_dir))
-                 if f.endswith(".gguf")), None)
+    gguf = paths.find_model_gguf(model_dir)
     if not gguf:
         return None
     try:

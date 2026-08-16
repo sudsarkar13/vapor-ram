@@ -50,12 +50,18 @@ def inspect_shards(model_dir=None):
 
     entries = [f for f in sorted(os.listdir(model_dir))
                if os.path.isfile(os.path.join(model_dir, f))]
-    gguf = [f for f in entries if f.endswith(".gguf")]
+    all_gguf = [f for f in entries if f.endswith(".gguf")]
+    gguf = [f for f in all_gguf if not paths.is_mmproj(f)]
+    projectors = [f for f in all_gguf if paths.is_mmproj(f)]
     safetensors = [f for f in entries if f.endswith(".safetensors")]
     total = sum(os.path.getsize(os.path.join(model_dir, f)) for f in entries)
 
-    print(f" Files     : {len(entries)}  ({len(gguf)} gguf, {len(safetensors)} safetensors)")
+    print(f" Files     : {len(entries)}  ({len(gguf)} weights, "
+          f"{len(projectors)} projector, {len(safetensors)} safetensors)")
     print(f" Disk size : {total / 1e9:.2f} GB")
+    for name in projectors:
+        size = os.path.getsize(os.path.join(model_dir, name))
+        print(f" Projector : {name} ({size / 1e9:.2f} GB) — enables image/audio input")
 
     if not gguf:
         print()
