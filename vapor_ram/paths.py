@@ -68,6 +68,16 @@ def engine_bin():
     return _resolve(os.path.join("c", "vapor_engine"))
 
 
+def simd_bench_bin():
+    """Standalone AVX2/NEON microbenchmark binary (may legitimately be absent).
+
+    This is a dot-product microbenchmark, not part of the token path — see
+    tools/simd_bench.c. It is built by `make -C c` alongside the streaming
+    inspector.
+    """
+    return _resolve(os.path.join("c", "simd_bench"))
+
+
 def default_model_dir():
     """Where downloaded weights land by default.
 
@@ -104,7 +114,18 @@ def config_path():
     """Location of vapor.json.
 
     Writable-by-the-user config belongs outside site-packages once installed.
+
+    VAPOR_CONFIG_PATH overrides the search entirely. Tests use it to avoid
+    writing to a developer's real configuration, and it lets one host run
+    several servers with independent settings.
     """
+    override = os.environ.get("VAPOR_CONFIG_PATH")
+    if override:
+        parent = os.path.dirname(os.path.abspath(override))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        return override
+
     checkout_cfg = os.path.join(PARENT_DIR, "vapor.json")
     if install_root() != PACKAGE_DIR or os.path.exists(checkout_cfg):
         return checkout_cfg

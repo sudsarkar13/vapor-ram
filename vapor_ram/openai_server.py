@@ -24,7 +24,7 @@ SAFE_GGUF_MAX_CONTEXT = 16384
 MIN_CONTEXT_WINDOW = 512
 DEFAULT_CONTEXT_WINDOW = 8192
 
-VERSION = "1.0.7-beta.3"
+VERSION = "1.0.7"
 
 # Reasoning is on by default: this model supports it natively and the answers
 # are better for it. Operators can turn it off globally, and callers can
@@ -581,6 +581,26 @@ def find_gguf(path):
     return None
 
 
+def weights_format(gguf_path=None):
+    """Describe the weights the way they are actually stored and loaded.
+
+    This used to be the hard-coded string "GGUF / Int4 SSD Stream", which was
+    wrong twice over: the file is a mixed-precision K-quant (Q4_K/Q5_K/Q6_K),
+    not int4, and llama.cpp memory-maps it rather than streaming it from SSD.
+    The figure is now read from the GGUF tensor directory, so it cannot drift
+    away from the file on disk.
+    """
+    try:
+        report = cortex.layer_report(gguf_path)
+        quants = report.get("quant_summary") or []
+        if quants:
+            names = ", ".join(q["type"] for q in quants[:3])
+            return f"GGUF ({names}), memory-mapped"
+    except Exception:
+        pass
+    return "GGUF, memory-mapped"
+
+
 def telemetry_snapshot():
     """Shared live-metrics block. Every status endpoint returns the same shape so the
     dashboard reads one contract instead of four slightly different ones."""
@@ -1052,10 +1072,16 @@ def get_llama(gguf_file):
 
 
 def generate_tokens(messages, preset, sampling, max_tokens, enable_thinking=None,
-                    effort=None):
+                    effort=None, stats=None):
     """Yield generated text pieces as llama.cpp decodes them.
 
     This is a generator: the caller can forward each piece to the client immediately.
+
+    `stats`, if given, is a dict this fills in with real token counts:
+    `prompt_tokens` from the model's own tokenizer and `completion_tokens`
+    counted one per llama.cpp chunk. Callers cannot derive the latter by
+    counting yielded pieces, because ThinkingSplitter may split one token
+    across several pieces or hold a partial control marker back.
     """
     gguf_file = find_gguf(current_model_path)
     if not gguf_file:
@@ -1082,11 +1108,20 @@ def generate_tokens(messages, preset, sampling, max_tokens, enable_thinking=None
                 stop=STOP_SEQUENCES,
                 stream=True,
             )
+            if stats is not None:
+                try:
+                    stats["prompt_tokens"] = len(llm.tokenize(prompt.encode("utf-8")))
+                except Exception:
+                    stats["prompt_tokens"] = None
+                stats["completion_tokens"] = 0
+
             splitter = ThinkingSplitter()
             for chunk in stream:
                 piece = chunk["choices"][0].get("text", "")
                 if not piece:
                     continue
+                if stats is not None:
+                    stats["completion_tokens"] += 1
                 for channel, text in splitter.feed(piece):
                     if text:
                         yield channel, text
@@ -1296,7 +1331,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 "version": VERSION,
                 "model": MODEL_ID,
                 "active_model": MODEL_ID,
-                "format": "GGUF / Int4 SSD Stream",
+                "format": weights_format(gguf),
                 "connection": "CONNECTED" if tele["model_available"] else "NO_WEIGHTS",
             }
             # /health stays reachable without a key so a client can confirm it
@@ -1742,11 +1777,12 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                                            effort=want_effort)
 
         started = time.perf_counter()
+        gen_stats = {}
         try:
             reasoning_parts, answer_parts = [], []
             for channel, piece in generate_tokens(messages, preset, sampling,
                                                   max_tokens, enable_thinking=want_thinking,
-                                                  effort=want_effort):
+                                                  effort=want_effort, stats=gen_stats):
                 if channel == "truncated":
                     answer_parts.append(f"\n\n\u26a0\ufe0f {piece}")
                     continue
@@ -1756,8 +1792,24 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         except EngineError as e:
             return self._send_json({"error": "Engine Error", "message": str(e)}, status=503)
         elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
-        timings = {"wall_time_ms": elapsed_ms, "completion_tokens": None}
+        # Real counts from the tokenizer, not a guess from the yielded pieces.
+        prompt_tokens = gen_stats.get("prompt_tokens")
+        completion_tokens = gen_stats.get("completion_tokens", 0)
+        timings = {
+            "wall_time_ms": elapsed_ms,
+            "completion_tokens": completion_tokens,
+            "tokens_per_second": (
+                round(completion_tokens / (elapsed_ms / 1000.0), 2) if elapsed_ms > 0 else None),
+        }
         record_timings(**timings)
+        # OpenAI clients read `usage`; without it the SDK reports zero tokens for
+        # every non-streaming call. Absent until v1.0.7.
+        usage = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": (prompt_tokens + completion_tokens)
+            if isinstance(prompt_tokens, int) else completion_tokens,
+        }
 
         if path.endswith("/responses"):
             return self._send_json({
@@ -1765,6 +1817,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 "response": text, "reasoning_content": reasoning,
                 "created": int(time.time()),
                 "preset": preset["id"], "kv_slots": n_ctx, "timings": timings,
+                "usage": usage,
             })
 
         return self._send_json({
@@ -1775,6 +1828,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             "preset": preset["id"],
             "kv_slots": n_ctx,
             "timings": timings,
+            "usage": usage,
             "choices": [{
                 "index": 0,
                 "message": {"role": "assistant", "content": text,
@@ -1827,11 +1881,12 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         first_token_ms = None
         first_answer_ms = None
         truncated_note = None
+        gen_stats = {}
         try:
             for channel, piece in generate_tokens(messages, preset, sampling,
                                                   max_tokens,
                                                   enable_thinking=enable_thinking,
-                                                  effort=effort):
+                                                  effort=effort, stats=gen_stats):
                 # Time to first token is when the user first sees output, which
                 # is the first reasoning token when thinking is on. Counting
                 # only answer tokens made a 19s reasoning pass read as
@@ -1881,11 +1936,23 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 round(total_tokens / (elapsed_ms / 1000.0), 2) if elapsed_ms > 0 else None),
         }
         record_timings(**timings)
+        # Token counts straight from the tokenizer. token_count/reasoning_count
+        # count yielded pieces, which is what the UI displays per channel, but
+        # the splitter can emit several pieces for one token — so `usage` uses
+        # the real count instead.
+        prompt_tokens = gen_stats.get("prompt_tokens")
+        generated_tokens = gen_stats.get("completion_tokens", total_tokens)
+        usage = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": generated_tokens,
+            "total_tokens": (prompt_tokens + generated_tokens)
+            if isinstance(prompt_tokens, int) else generated_tokens,
+        }
         try:
             emit(envelope(
                 {"content": f"\n\n\u26a0\ufe0f {truncated_note}"} if truncated_note else {},
                 finish_reason="length" if truncated_note else "stop",
-                extra={"timings": timings,
+                extra={"timings": timings, "usage": usage,
                        "reasoning_truncated": bool(truncated_note)}))
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()

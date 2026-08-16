@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 VaporRAM — Main CLI Launcher
-Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it
+Local LLM inference server, CLI and dashboard for google/gemma-4-E4B-it
 """
 import os, sys, argparse, subprocess, webbrowser, socket, json
 
@@ -15,7 +15,7 @@ PRESETS_DIR = paths.presets_dir()
 
 BANNER = f"""\033[1;36m
   💨 VaporRAM v{__version__}
-  Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it
+  Local inference server, CLI and dashboard for google/gemma-4-E4B-it
 \033[0m"""
 
 def get_local_ip():
@@ -101,14 +101,19 @@ def list_presets():
     print()
 
 def main():
-    parser = argparse.ArgumentParser(description="VaporRAM — Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it")
+    parser = argparse.ArgumentParser(description="VaporRAM — Local LLM inference server, CLI and dashboard for google/gemma-4-E4B-it")
     parser.add_argument("--version", action="version", version=f"VaporRAM {__version__}")
     subparsers = parser.add_subparsers(dest="command")
 
     # Commands
     subparsers.add_parser("doctor", help="Run system and hardware diagnostics")
-    subparsers.add_parser("plan", help="Display memory budget breakdown (< 1.5 GB RAM)")
-    subparsers.add_parser("bench", help="Run performance & RAM benchmark")
+    subparsers.add_parser("plan", help="Display memory budget against the RAM ceiling target")
+    bench_parser = subparsers.add_parser(
+        "bench", help="Measure O_DIRECT streaming throughput on the real model blocks")
+    bench_parser.add_argument(
+        "--simd", action="store_true",
+        help="Instead run the standalone AVX2/NEON dot-product microbenchmark "
+             "(c/simd_bench). It measures the CPU, not the model.")
     subparsers.add_parser("profile", help="Run high-precision RAM memory profiler")
     
     inspect_parser = subparsers.add_parser("inspect", help="Inspect model weight files and tensor layout")
@@ -217,9 +222,16 @@ def main():
         print(resource_plan.format_plan(plan))
 
     elif args.command == "bench":
+        if getattr(args, "simd", False):
+            binary = paths.simd_bench_bin()
+            if not os.path.isfile(binary) or not os.access(binary, os.X_OK):
+                print(f"\033[31m[VaporRAM]\033[0m SIMD microbenchmark not built.")
+                print(f"  Build it with: make -C c")
+                sys.exit(1)
+            sys.exit(subprocess.call([binary]))
         paths.ensure_tools_importable()
         import bench
-        bench.run_benchmark()
+        sys.exit(bench.run_benchmark() or 0)
 
     elif args.command == "profile":
         paths.ensure_tools_importable()
@@ -250,8 +262,11 @@ def main():
         list_presets()
 
     elif args.command == "init-config":
+        # Write where the server actually reads. Calling save_default_config()
+        # with its cwd-relative default dropped a vapor.json wherever the user
+        # happened to be standing, which the server then never read.
         from . import config
-        config.save_default_config()
+        config.save_default_config(paths.config_path())
 
     elif args.command == "download":
         paths.ensure_tools_importable()

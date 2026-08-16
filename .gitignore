@@ -3,6 +3,12 @@ __pycache__/
 *.o
 *.so
 *.egg-info/
+
+# Compiled C engine output. These are build artifacts: setup.py runs
+# `make -C c` at install time and MANIFEST.in ships the sources, so a
+# committed binary only served to push one host's architecture at every
+# other host. They were tracked until v1.0.7; `git rm --cached` fixed it.
+c/vapor_engine
 c/simd_bench
 .DS_Store
 models/
@@ -39,3 +45,8 @@ vapor_ram/web/
 vapor_ram/presets/
 vapor_ram/tools/
 vapor_ram/c/
+
+# Runtime configuration, written by the server whenever a setting changes.
+# Tracked until v1.0.7, where it repeatedly reset users' own settings.
+# vapor.example.json is the tracked reference copy.
+vapor.json

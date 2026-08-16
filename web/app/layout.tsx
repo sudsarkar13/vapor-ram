@@ -16,9 +16,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-	title: "VaporRAM — Ultra-Low RAM SSD Streaming LLM",
+	title: "VaporRAM — Local LLM Inference Server",
 	description:
-		"VaporRAM streams google/gemma-4-E4B-it directly from NVMe under a strict 1.5 GB RAM ceiling. C SIMD, O_DIRECT double-buffer, int8 KV cache.",
+		"OpenAI-compatible local inference server, terminal chat client and dashboard for google/gemma-4-E4B-it. Token generation runs on llama.cpp; the dashboard reports only measured values.",
 	applicationName: "VaporRAM",
 	icons: {
 		icon: [

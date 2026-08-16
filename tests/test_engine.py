@@ -9,7 +9,7 @@ static asset serving.
 These tests never require model weights — generation itself is covered by asserting
 that a weightless engine returns a clean 503 rather than a fabricated answer.
 """
-import os, sys, json, time, socket, threading, urllib.request, urllib.error, subprocess, tempfile
+import os, sys, json, time, socket, threading, urllib.request, urllib.error, subprocess, tempfile, shutil
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
@@ -719,6 +719,138 @@ def test_network_sharing():
         openai_server.configure_sharing("127.0.0.1", 8000, require_auth=False)
 
 
+
+def test_stable_release_honesty(port):
+    """Guard the claims and the config plumbing this release depends on.
+
+    Every check here corresponds to something that shipped wrong through
+    v1.0.7-beta.3: a hard-coded weight-format string that described the model
+    as int4 SSD-streamed, an OpenAI API with no `usage` block, a config wizard
+    that wrote the API key somewhere the server never reads, and `init-config`
+    dropping vapor.json into the current directory.
+    """
+    print("\n[13] Stable-release honesty")
+    from vapor_ram import openai_server as s
+    from vapor_ram import paths, config
+
+    # --- weights format is derived, not asserted ---------------------------
+    fmt = s.weights_format()
+    check("weights_format never claims SSD streaming",
+          "ssd" not in fmt.lower() and "stream" not in fmt.lower(), fmt)
+    check("weights_format never claims int4",
+          "int4" not in fmt.lower(), fmt)
+    check("weights_format says how the weights are loaded",
+          "mapped" in fmt.lower(), fmt)
+
+    gguf = s.find_gguf(s.current_model_path)
+    if gguf:
+        detailed = s.weights_format(gguf)
+        check("weights_format names real quantisation types from the file",
+              any(q in detailed for q in ("Q4_K", "Q5_K", "Q6_K", "F32", "BF16")),
+              detailed)
+
+    # --- /health reports the derived format --------------------------------
+    base = f"http://127.0.0.1:{port}"
+    status, health = get(f"{base}/health")
+    check("/health format field is the derived one",
+          health.get("format", "").startswith("GGUF"), health.get("format"))
+    check("/health no longer advertises 'Int4 SSD Stream'",
+          "Int4 SSD Stream" not in json.dumps(health), "stale claim present")
+
+    # --- generate_tokens accepts a stats sink ------------------------------
+    import inspect
+    sig = inspect.signature(s.generate_tokens)
+    check("generate_tokens exposes a stats parameter",
+          "stats" in sig.parameters, str(sig))
+
+    # --- VAPOR_CONFIG_PATH override ----------------------------------------
+    tmpdir = tempfile.mkdtemp(prefix="vapor-cfgtest-")
+    target = os.path.join(tmpdir, "nested", "vapor.json")
+    old_env = os.environ.get("VAPOR_CONFIG_PATH")
+    os.environ["VAPOR_CONFIG_PATH"] = target
+    try:
+        resolved = paths.config_path()
+        check("VAPOR_CONFIG_PATH overrides config resolution",
+              resolved == target, resolved)
+        check("config_path creates the parent directory",
+              os.path.isdir(os.path.dirname(target)), "parent missing")
+
+        # init-config must write there, not into the cwd
+        config.save_default_config(resolved)
+        check("init-config writes to the resolved path",
+              os.path.exists(target), "no file written")
+    finally:
+        if old_env is None:
+            os.environ.pop("VAPOR_CONFIG_PATH", None)
+        else:
+            os.environ["VAPOR_CONFIG_PATH"] = old_env
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    # --- defaults carry no fabricated quantisation claim -------------------
+    check("DEFAULT_CONFIG drops the invented quant_type key",
+          "quant_type" not in config.DEFAULT_CONFIG,
+          str(sorted(config.DEFAULT_CONFIG)))
+    check("DEFAULT_CONFIG carries a reasoning effort default",
+          config.DEFAULT_CONFIG.get("reasoning_effort") in s.REASONING_LEVELS,
+          str(config.DEFAULT_CONFIG.get("reasoning_effort")))
+
+    # --- the wizard must not persist secrets into vapor.json ---------------
+    wizard = os.path.join(HERE, "tools", "configure_wizard.py")
+    if os.path.exists(wizard):
+        src = open(wizard).read()
+        check("wizard strips api_key before saving vapor.json",
+              'new_cfg.pop("api_key", None)' in src, "secret may be persisted")
+        check("wizard merges rather than replacing the config",
+              "new_cfg = dict(current)" in src, "unasked keys would be dropped")
+
+    # --- no command may print a verdict it has not established -------------
+    from vapor_ram import resource_plan, doctor as doctor_mod
+
+    plan = resource_plan.build_plan()
+    rendered = resource_plan.format_plan(plan)
+    check("vapor plan no longer emits a hard-coded PASS",
+          "PASS" not in rendered, "fabricated verdict present")
+    check("vapor plan reports no invented 140 MB layer size",
+          "140.0 MB" not in rendered and "140 MB" not in rendered, rendered[:120])
+    if plan.get("geometry"):
+        geo = plan["geometry"]
+        check("vapor plan reads the real block count",
+              geo["n_layers"] == 42, str(geo["n_layers"]))
+        check("vapor plan sizes the buffer from a real block",
+              geo["largest_block_bytes"] > 0, str(geo.get("largest_block_bytes")))
+
+    diag = doctor_mod.run_doctor()
+    joined = json.dumps(diag)
+    check("doctor no longer claims a C SIMD streamer runtime",
+          "C SIMD Streamer" not in joined, joined[:160])
+    ram = next((c for c in diag if c.get("check") == "memory.ram"), None)
+    if ram:
+        check("doctor no longer grades RAM against the 1.5 GB target",
+              "1.5 GB Ceiling" not in ram.get("detail", ""), ram.get("detail"))
+
+    inspector = os.path.join(HERE, "tools", "inspect_shards.py")
+    if os.path.exists(inspector):
+        src = open(inspector).read()
+        check("vapor inspect no longer prints an unconditional readiness PASS",
+              "Readiness: PASS" not in src and "4048-byte" not in src,
+              "fabricated verdict still present")
+        check("vapor inspect reads the GGUF rather than guessing",
+              "read_gguf" in src, "not wired to the parser")
+
+    check("the zero-filling safetensors converter is gone",
+          not os.path.exists(os.path.join(HERE, "tools", "convert_gemma_safetensors.py")),
+          "tool that wrote 4.4 GB of zeros is still present")
+
+    # --- the benchmark must not fabricate a ceiling pass -------------------
+    bench = os.path.join(HERE, "tools", "bench.py")
+    if os.path.exists(bench):
+        src = open(bench).read()
+        check("bench.py no longer prints a PASS against the RAM ceiling",
+              "PASS (< 1.5 GB)" not in src, "fabricated pass still present")
+        check("bench.py measures the real GGUF",
+              "run_stream_benchmark" in src, "not wired to the measurement path")
+
+
 def main():
     print("=" * 60)
     print("   VaporRAM Integration Test Suite")
@@ -764,6 +896,7 @@ def main():
     test_gguf_and_streaming()
     test_thinking_mode()
     test_network_sharing()
+    test_stable_release_honesty(port)
 
     print("\n" + "=" * 60)
     if FAILED:

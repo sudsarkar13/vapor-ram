@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VaporRAM — Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it</title>
-<meta name="description" content="Stream google/gemma-4-E4B-it dense layers directly from NVMe SSD under a 1.5 GB RAM ceiling using AVX2 SIMD GEMV and zero-copy O_DIRECT prefetching.">
-<meta property="og:title" content="VaporRAM — google/gemma-4-E4B-it under 1.5 GB RAM">
-<meta property="og:description" content="Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it under 1.5 GB RAM.">
+<title>VaporRAM — Local LLM Inference Server for google/gemma-4-E4B-it</title>
+<meta name="description" content="OpenAI-compatible local inference server, terminal chat client and dashboard for google/gemma-4-E4B-it. Token generation runs on llama.cpp; every figure the dashboard shows is measured on your own hardware.">
+<meta property="og:title" content="VaporRAM — Local LLM Inference Server">
+<meta property="og:description" content="Run google/gemma-4-E4B-it locally: OpenAI-compatible API, terminal chat, network sharing and a dashboard that reports only measured values.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://sudsarkar13.github.io/vapor-ram/">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💨</text></svg>">
@@ -342,7 +342,7 @@ footer .flinks a:hover { color: var(--cyan); }
 <nav>
   <div class="in">
     <div class="brand">
-      <span style="font-size:1.4rem;line-height:1;display:inline-block;-webkit-text-fill-color:initial;">💨</span> VaporRAM <span class="vtag">v1.0.7-alpha.3</span>
+      <span style="font-size:1.4rem;line-height:1;display:inline-block;-webkit-text-fill-color:initial;">💨</span> VaporRAM <span class="vtag"><!--VERSION-->v1.0.7<!--/VERSION--></span>
     </div>
     <div class="nl">
       <a href="#features">Architecture</a>
@@ -359,11 +359,11 @@ footer .flinks a:hover { color: var(--cyan); }
 <div class="hero wrap">
   <div class="hero-glow"></div>
   <h1>
-    <span class="gradient-text">Zero Memory Pressure.</span><br>
-    Stream Gemma 4 E4B-it under 1.5 GB RAM.
+    <span class="gradient-text">Run Gemma 4 E4B-it locally.</span><br>
+    Every number measured, none invented.
   </h1>
   <p class="lead-text">
-    VaporRAM is a high-performance C/C++ engine engineered to stream dense 8B model layers sequentially from NVMe SSDs directly into RAM, achieving lightning fast local inference on consumer hardware.
+    VaporRAM is a local inference server, terminal client and dashboard for <strong>google/gemma-4-E4B-it</strong> — an OpenAI-compatible API, reasoning you can actually read, and network sharing behind an API key. Token generation runs on llama.cpp. The dashboard reports what it measures on your machine and nothing else.
   </p>
 
   <div class="cta-row">
@@ -372,7 +372,7 @@ footer .flinks a:hover { color: var(--cyan); }
       pip install vapor-ram
     </a>
     <a href="releases.html" class="btn-ghost">
-      v1.0.7-alpha.3 Alpha Release Downloads
+      <!--VERSION-->v1.0.7<!--/VERSION--> Release Downloads
     </a>
   </div>
 
@@ -382,22 +382,30 @@ footer .flinks a:hover { color: var(--cyan); }
 
   <div class="status-grid">
     <div class="status-card">
-      <div class="label">Target RAM Ceiling</div>
-      <div class="value" style="color:var(--emerald);">1.5 GB (target)</div>
+      <div class="label">Measured peak RSS</div>
+      <div class="value" style="color:var(--amber, #fbbf24);">7.27 GB</div>
     </div>
     <div class="status-card">
-      <div class="label">Actual RSS (alpha)</div>
-      <div class="value" style="color:var(--amber, #fbbf24);">~6 GB</div>
+      <div class="label">Measured throughput</div>
+      <div class="value" style="color:var(--emerald);">4.0–5.3 tok/s</div>
     </div>
     <div class="status-card">
-      <div class="label">AVX2 GEMV Core</div>
-      <div class="value" style="color:var(--indigo);">./vapor bench</div>
+      <div class="label">O_DIRECT streaming</div>
+      <div class="value" style="color:var(--indigo);">974.7 MB/s</div>
     </div>
     <div class="status-card">
-      <div class="label">RAM Budget Usage</div>
-      <div class="value">9.5%</div>
+      <div class="label">RAM ceiling target</div>
+      <div class="value">1.5 GB — not met</div>
     </div>
   </div>
+  <p style="margin-top:1.25rem;font-size:0.8rem;color:var(--text-dim,#94a3b8);max-width:52rem;margin-left:auto;margin-right:auto;line-height:1.6;">
+    Measured on an AMD Ryzen 7 5700U (8 cores / 16 threads, 15 GB RAM, NVMe SSD) with
+    <code class="mono">gemma-4-E4B-it-Q4_K_M.gguf</code> at <code class="mono">n_ctx</code> 8192.
+    Reproduce them on your own hardware with <code class="mono">vapor bench</code> — none of these
+    figures are estimates, and the 1.5 GB ceiling is a research goal the project has costed, not a
+    feature that is nearly done. See the
+    <a href="https://github.com/sudsarkar13/vapor-ram#what-is-actually-true" style="color:var(--cyan);">full breakdown</a>.
+  </p>
 </div>
 
 <!-- Architecture Features -->
@@ -410,24 +418,24 @@ footer .flinks a:hover { color: var(--cyan); }
       <div class="card-icon">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
       </div>
-      <h3>Sequential Layer Streaming</h3>
-      <p>Streams 32 dense transformer layers using POSIX unbuffered <code class="mono" style="color:var(--cyan);">O_DIRECT</code> reads with asynchronous <code class="mono" style="color:var(--cyan);">posix_fadvise</code> kernel hints, maintaining constant RAM usage.</p>
+      <h3>Measured Layer Streaming</h3>
+      <p>The C reader resolves each of the model's <strong>42 transformer blocks</strong> to its real byte range in the GGUF and streams it with unbuffered <code class="mono" style="color:var(--cyan);">O_DIRECT</code> reads and <code class="mono" style="color:var(--cyan);">posix_fadvise</code> hints, reporting per-block timings. This is a <strong>measurement path</strong> — it costs out the streaming design on your own SSD. It does not generate tokens.</p>
     </div>
 
     <div class="card-glass">
       <div class="card-icon">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
       </div>
-      <h3>AVX2 SIMD Accelerators</h3>
-      <p>Hand-crafted FMA3 matrix-vector kernels multi-threaded with OpenMP for the C streaming engine. Measure the speedup on your own hardware with <code>./vapor bench</code>.</p>
+      <h3>Reasoning You Can Read</h3>
+      <p><code class="mono" style="color:var(--cyan);">gemma-4-E4B-it</code> reasons natively, and VaporRAM shows the thought process as it streams — in a block you can expand and actually read, with four effort levels from <em>Low</em> to <em>Extra high</em>. Reasoning rides its own API channel, so clients that do not know about it render the answer alone.</p>
     </div>
 
     <div class="card-glass">
       <div class="card-icon">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M21 19c0 1.66-4 3-9 3s-9-1.34-9-3"></path></svg>
       </div>
-      <h3>int8 Quantized KV Cache</h3>
-      <p>Attention Key and Value states are dynamically quantized to int8 with per-token scale factors, reducing context RAM overhead to less than 250 MB.</p>
+      <h3>Honest Telemetry</h3>
+      <p>The dashboard reports the server's real RSS, the host's free RAM, the GGUF's actual tensor layout and the throughput of your last generation. Nothing is mocked or hard-coded — if a figure cannot be measured, it is not shown.</p>
     </div>
   </div>
 </section>
@@ -435,7 +443,7 @@ footer .flinks a:hover { color: var(--cyan); }
 <!-- Quickstart -->
 <section id="quickstart" class="wrap">
   <h2 class="section-title">Quickstart Guide</h2>
-  <p class="section-sub">Deploy in seconds with Python or run as a standalone C runtime.</p>
+  <p class="section-sub">Install from PyPI and run. Weights are downloaded separately.</p>
 
   <div style="margin-top:2rem;">
     <h4 style="font-size:1.1rem;font-weight:600;color:var(--text-main);">1. Install from PyPI</h4>

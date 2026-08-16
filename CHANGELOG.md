@@ -6,6 +6,155 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 
 
+## [v1.0.7] - 2026-08-16
+
+First stable release of the 1.0.7 line. The theme is **removing every claim the
+software could not back with a measurement**, and fixing the things that audit
+uncovered.
+
+### 🔎 Claims corrected
+
+Several figures and descriptions were wrong, some since the project began. Each
+is now derived from the file or the machine, or is gone.
+
+- **`vapor bench` fabricated a passing result.** It invoked the C engine with
+  `c/vapor_engine.o` — an object file — as stand-in weights. The call failed
+  every time, and the tool then measured the peak RSS of the process that had
+  just failed to start and reported `RAM Status : PASS (< 1.5 GB)`. The
+  project's own advertised benchmark therefore reported the headline RAM
+  ceiling as met, on the strength of a process that never loaded the model.
+  It now streams the model's real 42 block ranges through `O_DIRECT` and
+  reports measured throughput, per-block latency, and what streaming would
+  cost per token. It no longer grades itself against the ceiling at all.
+- **`vapor bench --simd` reported ~200,000 GFLOPS** — roughly a thousand times
+  what this class of CPU can produce. The results were unused, so `-O3` deleted
+  both timing loops; the "scalar" baseline was also auto-vectorised into the
+  very instructions it was supposed to be compared against, and the pure
+  function was hoisted out of the loop entirely. Fixed with a compiler barrier,
+  a genuinely scalar baseline and enough iterations to measure. It now reports
+  **2.76 GFLOPS scalar vs 14.13 GFLOPS AVX2 (5.12x)**, stable across runs. Its
+  vector dimension also claimed to be "Gemma hidden size" while being 3072; this
+  model's hidden size is **2560**. It also printed `OpenMP Threads : 16` while
+  running single-threaded — there is no `#pragma omp` anywhere in the C sources.
+- **`vapor plan` printed a passing verdict against the RAM ceiling.** Every
+  input was a hard-coded constant: a 140 MB layer size (real blocks average
+  61.7 MB), 32 layers (there are 42), 16 attention heads (there are 8, with 2
+  KV heads), and flat 150 MB / 100 MB allowances. They summed to 786 MB,
+  compared to the 1.5 GB ceiling, and reported `Plan Status : PASS` while the
+  engine's measured RSS was over 7 GB. It now sizes the streaming design from
+  the file's real geometry, reports the running server's measured RSS when one
+  is reachable, and states plainly that the ceiling is not met.
+- **`vapor inspect` printed four wrong architecture numbers and a fabricated
+  pass.** It read only `config.json`, whose architecture keys are nested under
+  `text_config` for this model, so every lookup missed and its fallbacks were
+  printed as fact: hidden size 3072 (really 2560), 32 layers (42), 16 heads
+  (8), vocab 256000 (262144). It ignored the GGUF entirely and closed with an
+  unconditional streaming-readiness pass quoting an NVMe block size that does
+  not exist. Rewritten against the GGUF parser, with a real integrity check:
+  the tensor directory must account for the file exactly.
+- **`vapor doctor` passed a machine that cannot run the model.** It checked
+  free RAM against the 1.5 GB *target* rather than the engine's real
+  requirement, so a host with 2 GB available was told it was fine and then
+  failed to load 4.98 GB of memory-mapped weights. It also reported
+  "GGUF Engine & C SIMD Streamer Ready" whenever either component was present,
+  describing the streaming inspector as part of the runtime. Both fixed.
+- **`tools/convert_gemma_safetensors.py` never converted anything.** It opened
+  no tensor: it wrote 32 slots of 140 MB of zeros — 4.4 GB — printed
+  `[Success] Converted binary saved` and reported the file size, in a container
+  format nothing in the project reads. Removed.
+- **`tools/quantize_gemma.py`** called itself a "Weight Quantization Engine"
+  that "converts FP16 / BF16 Gemma 4 E4B-it tensors" while quantising
+  `np.random.randn`. The packing maths is real, so it is kept and relabelled as
+  the demonstration it is.
+- **`/health` described the weights as `GGUF / Int4 SSD Stream`.** Wrong twice:
+  the file is a mixed K-quant (Q4_K/Q5_K/Q6_K, plus F32 and BF16), and
+  llama.cpp memory-maps it rather than streaming it. The field is now read from
+  the GGUF tensor directory.
+- **`quant_type: "int8_kv_int4_weights"`** sat in the default configuration
+  describing a quantisation scheme the project does not use. Nothing read it.
+  Removed, along with the equally dead `max_seq_len`.
+- **The package described itself as an "Ultra-Low RAM SSD Streaming Engine"** on
+  PyPI, in the CLI banner, in the dashboard and in the page title, and the
+  documentation site advertised streaming "under a 1.5 GB RAM ceiling" as fact.
+  Nothing is streamed during generation. All of it now describes what the
+  software does.
+- **The documentation site** claimed 32 transformer layers (there are 42), an
+  "8B" model (7.52 B parameters), an int8 KV cache holding context under 250 MB
+  (llama.cpp uses its own f16 cache), a fabricated "RAM Budget Usage 9.5%", and
+  a standalone C runtime that does not exist. It had also sat on `v1.0.7-alpha.3`
+  for eight releases while its sync job claimed to update it.
+
+### 📊 Every README figure is now measured
+
+Measured on an AMD Ryzen 7 5700U (8 cores / 16 threads, 15 GB RAM, NVMe) with
+`gemma-4-E4B-it-Q4_K_M.gguf`, and reproducible with `vapor bench`:
+
+| | |
+| :--- | ---: |
+| Peak RSS, `n_ctx` 8192 | 7.27 GB |
+| Peak RSS, `n_ctx` 16384 | 8.72 GB |
+| Cost of doubling context | 1.45 GB |
+| Throughput | 4.0–5.3 tok/s |
+| Server start → ready | 9.5 s |
+| `O_DIRECT` streaming | 974.7 MB/s, 60.0 ms/block |
+| If every block were streamed per token | 2.54 s/token (0.39 tok/s) |
+
+The README now opens with a table of what is true, including the plain
+statement that **the 1.5 GB RAM ceiling is not met** and what reaching it would
+cost. The ceiling remains a costed research goal, not a feature nearly done.
+
+### 🐛 Fixed Bugs & Issues
+
+- **The OpenAI API returned no `usage` block.** `completion_tokens` was
+  hard-coded to `None`, so any SDK client saw zero tokens for every
+  non-streaming call. Both the streaming and non-streaming paths now report
+  real counts — prompt tokens from the model's own tokenizer, completion tokens
+  counted per llama.cpp chunk rather than per yielded piece, since the thinking
+  splitter can emit several pieces for one token.
+- **The configuration wizard wrote the API key into `vapor.json`**, which the
+  server never reads — it only ever loads the key from `~/.vapor-ram/api_key`.
+  A key entered in the wizard silently did nothing while telling the user
+  authorization was configured. It now writes through the same helper the
+  server uses, and never persists a secret to `vapor.json`.
+- **The wizard also discarded settings.** It built a fresh dict and overwrote
+  the file, dropping every key it does not ask about — `n_ctx`,
+  `enable_thinking`, `reasoning_effort`. It now merges.
+- **`vapor init-config` wrote to the current working directory** instead of the
+  path the server reads, leaving a `vapor.json` wherever the user happened to
+  be standing.
+- **`vapor.json` was tracked in git** while the server writes to it on every
+  settings change, so a checkout could silently reset a user's configuration.
+  It is now untracked and ignored; `vapor.example.json` is the tracked
+  reference. `VAPOR_CONFIG_PATH` overrides the location.
+- **Compiled binaries were tracked in git.** `c/vapor_engine` and
+  `c/simd_bench` were committed, pushing one host's architecture at every other
+  host — `c/simd_bench` was even listed in `.gitignore`, which does nothing for
+  an already-tracked file. Both untracked; `setup.py` builds them at install
+  time and `MANIFEST.in` ships the sources.
+- **The docs sync job could not do its job.** Its two regexes matched neither
+  the nav version tag nor the download button. Version strings are now wrapped
+  in explicit markers, and the job fails loudly if any stale version survives.
+
+### 🧹 Removed
+
+- `tools/fix_webui.py` — 20 KB patching a hand-written dashboard replaced long
+  ago, referenced by nothing, still shipped in the sdist.
+- `docs/assets/changelog.json` and `docs/assets/releases.json` — frozen at
+  `v1.0.7-alpha.1` and read by nothing; both docs pages fetch the GitHub API
+  directly. They also claimed 135.5 MB release tarballs; the real ones are
+  1.17 MB.
+
+### ✅ Testing
+
+- Integration suite grows to **164 checks**, with a new group that guards each
+  corrected claim: the weight-format string, the `usage` block, config-path
+  resolution, the wizard's secret handling and merge behaviour, and that the
+  benchmark can never again print a pass against the RAM ceiling.
+- `Development Status` moves to **5 - Production/Stable**; Python 3.9 and 3.12
+  are declared and both are tested in CI.
+
+---
+
 ## [v1.0.7-beta.3] - 2026-08-16
 
 ### 🚀 Highlights & Features

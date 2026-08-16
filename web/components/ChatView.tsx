@@ -157,7 +157,7 @@ export function ChatView({
 								VaporRAM Dashboard
 							</h2>
 							<p className="text-xs text-slate-400 mt-1 leading-relaxed">
-								Ultra-Low RAM SSD Streaming Engine running{" "}
+								Local inference server running{" "}
 								<span className="text-cyan-300 font-semibold">
 									google/gemma-4-E4B-it
 								</span>{" "}

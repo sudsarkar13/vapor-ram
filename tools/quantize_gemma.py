@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 """
-VaporRAM — Weight Quantization Engine
-Converts FP16 / BF16 Gemma 4 E4B-it tensors to packed q4_0 / q8_0 format.
+VaporRAM — q4_0 / q8_0 packing demonstration
+
+The block-quantisation maths here is real, but it runs on a synthetic array
+(`np.random.randn`), not on Gemma weights. Nothing in VaporRAM consumes its
+output: the served model is a GGUF quantised ahead of time, and llama.cpp
+handles dequantisation.
+
+The docstring used to read "Weight Quantization Engine / Converts FP16 / BF16
+Gemma 4 E4B-it tensors", which described a conversion this file has never
+performed. Kept as a reference implementation of the packing format; it is not
+wired to the CLI.
 """
 import os, sys, struct, argparse
 import numpy as np

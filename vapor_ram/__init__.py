@@ -1,5 +1,5 @@
 """
-VaporRAM — Ultra-Low RAM SSD Streaming Engine for google/gemma-4-E4B-it
+VaporRAM — Local LLM inference server, CLI and dashboard for google/gemma-4-E4B-it
 
 Public surface:
     from vapor_ram import openai_server, doctor, resource_plan, config

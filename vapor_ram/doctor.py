@@ -99,32 +99,52 @@ def run_doctor():
         "detail": simd_detail
     })
     
-    # 3. Memory (RAM) Ceiling Inspector
+    # 3. Memory inspector
+    #
+    # This used to pass whenever 1.5 GB was free, checking against the RAM
+    # ceiling *target* rather than what the engine actually needs. On a machine
+    # with 2 GB available it reported "ok" and the server then failed to load
+    # 4.98 GB of memory-mapped weights. The threshold is now the measured
+    # requirement; the 1.5 GB target is a research goal, not a system spec.
     total_gb, avail_gb = get_ram_info()
-    ram_ok = avail_gb >= 1.5
+    NEEDED_GB = 7.5          # measured peak RSS at n_ctx 8192 is 7.27 GB
+    COMFORTABLE_GB = 9.0
+    if avail_gb >= COMFORTABLE_GB:
+        ram_status, note = "ok", "comfortable"
+    elif avail_gb >= NEEDED_GB:
+        ram_status, note = "ok", "enough, with little headroom"
+    else:
+        ram_status, note = "warn", f"below the ~{NEEDED_GB:.1f} GB the engine needs"
 
     checks.append({
         "check": "memory.ram",
-        "status": "ok" if ram_ok else "warn",
-        "detail": f"{total_gb:.1f} GB Total · {avail_gb:.1f} GB Available (Target: < 1.5 GB Ceiling)"
+        "status": ram_status,
+        "detail": f"{total_gb:.1f} GB Total · {avail_gb:.1f} GB Available ({note})"
     })
     
     # 4. Engine & GGUF Runtime Check
-    engine_bin = os.path.join(os.path.dirname(__file__), "c", "vapor_engine")
-    has_bin = os.path.exists(engine_bin)
-    
+    #
+    # These are two independent things and are now reported as such. The old
+    # message read "GGUF Engine & C SIMD Streamer Ready" whenever *either* was
+    # present, so a host with no C tools was told the streamer was ready --
+    # and the streamer is a measurement tool, not part of the token path.
+    from . import paths as _paths
+    has_bin = os.path.exists(_paths.engine_bin())
+
     try:
         import llama_cpp
         has_llama = True
     except ImportError:
         has_llama = False
 
-    if has_llama or has_bin:
-        runtime_detail = "GGUF Engine & C SIMD Streamer Ready"
+    if has_llama:
+        runtime_detail = "llama.cpp ready (generates tokens)"
         runtime_ok = True
     else:
-        runtime_detail = "Auto-installing llama-cpp-python on first run"
+        runtime_detail = "llama-cpp-python not installed; it is installed on first run"
         runtime_ok = True
+    runtime_detail += (" · streaming inspector built" if has_bin
+                       else " · streaming inspector not built (optional; `make -C c`)")
 
     checks.append({
         "check": "engine.runtime",

@@ -10,7 +10,9 @@ include CHANGELOG.md
 include RELEASE_NOTES.md
 include vapor
 recursive-include vapor_ram *.py
-include vapor.json
+# vapor.json is runtime state written by the server and is no longer tracked;
+# ship the reference copy instead.
+include vapor.example.json
 include vapor.service
 include MANIFEST.in
 

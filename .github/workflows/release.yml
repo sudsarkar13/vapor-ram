@@ -364,9 +364,32 @@ jobs:
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
           TAG="${{ needs.validate.outputs.tag }}"
-          # Point every release link at the tag just published.
-          sed -i -E "s#releases/tag/v[0-9]+\.[0-9]+\.[0-9]+(-[a-z]+\.[0-9]+)?#releases/tag/${TAG}#g" docs/index.html
-          sed -i -E "s#v[0-9]+\.[0-9]+\.[0-9]+(-[a-z]+\.[0-9]+)? Release#${TAG} Release#g" docs/index.html
+
+          # Every version-bearing span in docs/index.html is wrapped in
+          # <!--VERSION-->...<!--/VERSION--> markers. The previous rules were two
+          # loose regexes that matched neither the nav tag nor the download
+          # button, so the published page sat on v1.0.7-alpha.3 for eight
+          # releases while claiming to be synced.
+          python3 - "$TAG" <<'PYEOF'
+          import re, sys, pathlib
+          tag = sys.argv[1]
+          page = pathlib.Path("docs/index.html")
+          html = page.read_text(encoding="utf-8")
+          html, n = re.subn(r"<!--VERSION-->.*?<!--/VERSION-->",
+                            f"<!--VERSION-->{tag}<!--/VERSION-->", html, flags=re.S)
+          html = re.sub(r"releases/tag/v[0-9]+\.[0-9]+\.[0-9]+(?:-[a-z]+\.[0-9]+)?",
+                        f"releases/tag/{tag}", html)
+          page.write_text(html, encoding="utf-8")
+          print(f"replaced {n} version marker(s) with {tag}")
+          if n == 0:
+              sys.exit("::error::no <!--VERSION--> markers found in docs/index.html")
+          PYEOF
+
+          # Fail loudly if any stale version string survives anywhere on the page.
+          if grep -oE "v1\.[0-9]+\.[0-9]+(-[a-z]+\.[0-9]+)?" docs/index.html | grep -v "^${TAG}$"; then
+            echo "::error::docs/index.html still references a version other than ${TAG}"
+            exit 1
+          fi
           git diff --stat
 
       - name: Commit if changed
