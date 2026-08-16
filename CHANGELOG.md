@@ -4,19 +4,24 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 ---
 
-## [Unreleased]
+
+
+## [v1.0.7-beta.2] - 2026-08-16
 
 ### 🚀 Highlights & Features
-- **Reasoning / thinking mode, working for real.** `gemma-4-E4B-it` supports it natively; VaporRAM now uses it. Enabled by default when the active model's chat template implements a thinking channel, detected by reading the template out of the GGUF rather than assuming. Switch in the sidebar, `--think`/`--no-think` on `vapor serve`, `web`, `run` and `chat`, `/think` mid-session in the terminal, and `{"thinking": false}` per request.
-- **Reasoning streams on its own channel**: `delta.reasoning_content` in SSE, so clients that do not know about it render the answer alone. The dashboard shows a collapsed **Thinking** block that animates while reasoning streams and expands to the full thought process.
-- **Timings now separate the two**: `reasoning_tokens`, `first_answer_ms` alongside `first_token_ms`, and throughput computed over everything the model produced.
-- **Budget exhaustion is reported**: reasoning shares `max_tokens` with the answer, and on a hard question can consume all of it. That is detected and explained rather than surfacing as an empty reply.
+- **Reasoning / thinking mode, working for real.** `gemma-4-E4B-it` supports it natively; VaporRAM now uses it. On by default when the active model's chat template implements a thinking channel — detected by reading the template out of the GGUF rather than assuming, so the switch is only offered when it would do something. Sidebar switch, `--think`/`--no-think` on `serve`, `web`, `run` and `chat`, `/think` mid-session, and `{"thinking": false}` per request. Persisted to `vapor.json`.
+- **The thought process is readable.** Reasoning appears above each reply in a block that animates while it streams and is **open by default** so it can be read as it arrives; collapsing is opt-in.
+- **Reasoning streams on its own channel** (`delta.reasoning_content`), so clients that do not know about it render the answer alone rather than mixing the two.
+- **Timings separate the two**: `reasoning_tokens` and `first_answer_ms` alongside `first_token_ms`, with throughput computed over everything produced.
 
 ### 🐛 Fixed Bugs & Issues
-- **The prompt format was wrong for this model, in every request ever sent.** `build_prompt` used `<start_of_turn>` / `<end_of_turn>`, which are **not in `gemma-4-E4B-it`'s vocabulary** — they tokenised as literal text. The real markers, verified against the GGUF vocabulary, are `<|turn>` (105) and `<turn|>` (106, also EOS). Stop sequences had the same problem and never matched a real token.
-- **The model has a system turn.** `build_prompt` folded system instructions into the first user message on the belief that Gemma has no system role. This model's template opens `<|turn>system`, and that is now used.
+- **The prompt format was wrong for this model, in every request ever sent.** `build_prompt` used `<start_of_turn>` / `<end_of_turn>`, which are **not in `gemma-4-E4B-it`'s vocabulary** — they tokenised as literal text. Verified against the GGUF vocabulary, the real markers are `<|turn>` (105) and `<turn|>` (106, also EOS). The stop sequences had the same defect and never matched a real token.
+- **The model has a system turn.** Instructions were folded into the first user message on the belief that Gemma has no system role; this model's template opens `<|turn>system`.
+- **No cache headers were sent for the dashboard**, so browsers applied heuristic caching to `index.html` and could keep serving a previous build after an upgrade — new UI would simply not appear. `index.html` is now `no-cache`; content-hashed assets under `/_next/static/` are `immutable`.
+- **Reasoning was unreadable**: the thinking block was collapsed by default, so it looked like a bare animation with nothing to read.
+- **Budget exhaustion is reported**: reasoning shares `max_tokens` with the answer and can consume all of it; that is now detected and explained instead of returning an empty reply.
 - **Prior reasoning is stripped from replayed history**, mirroring the template's own `strip_thinking` macro.
-- **Correction to the v1.0.7-alpha.6 notes.** Those notes described `<|think|>` as "not a Gemma control token", removed from the presets on that basis. That was wrong: `<|think|>` is token 98 in this model's vocabulary and is its real reasoning token. It genuinely did nothing before — but because it was placed inside a preset's `system_instruction`, which the old prompt builder folded into a user turn, not because the token was meaningless.
+- **Correction to the v1.0.7-alpha.6 notes.** Those notes described `<|think|>` as "not a Gemma control token" and removed it from the presets on that basis. That was wrong: `<|think|>` is token 98 and is this model's real reasoning token. It did nothing before — but because it sat in a preset's `system_instruction` that the old prompt builder folded into a user turn, not because the token was meaningless.
 
 ---
 

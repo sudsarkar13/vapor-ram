@@ -24,7 +24,7 @@ SAFE_GGUF_MAX_CONTEXT = 16384
 MIN_CONTEXT_WINDOW = 512
 DEFAULT_CONTEXT_WINDOW = 8192
 
-VERSION = "1.0.7-beta.1"
+VERSION = "1.0.7-beta.2"
 
 # Reasoning is on by default: this model supports it natively and the answers
 # are better for it. Operators can turn it off globally, and callers can
@@ -1377,6 +1377,15 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", mime or "application/octet-stream")
                 self.send_header("Content-Length", str(len(content)))
+                # No cache headers were sent at all, so browsers applied their
+                # own heuristic caching to index.html and could keep serving a
+                # previous dashboard build after an upgrade. Assets under
+                # /_next/static/ carry a content hash in the filename and are
+                # safe to cache forever; the HTML entry point must not be.
+                if "/_next/static/" in path:
+                    self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+                else:
+                    self.send_header("Cache-Control", "no-cache, must-revalidate")
                 self.end_headers()
                 self.wfile.write(content)
             except (BrokenPipeError, ConnectionResetError):

@@ -13,8 +13,9 @@ interface ThinkingBlockProps {
 }
 
 /**
- * Collapsed by default: the reasoning is working-out, not the answer, and
- * should not push the reply off screen. Clicking opens it.
+ * Open by default. Reading the reasoning is the point of showing it, and
+ * collapsing it by default meant the block looked like a bare animation with
+ * nothing to read. Collapsing is available but opt-in.
  */
 export function ThinkingBlock({
 	text,
@@ -22,7 +23,7 @@ export function ThinkingBlock({
 	durationMs,
 	tokens,
 }: ThinkingBlockProps) {
-	const [open, setOpen] = useState(false);
+	const [open, setOpen] = useState(true);
 	if (!text && !active) return null;
 
 	const summary = active
@@ -56,14 +57,20 @@ export function ThinkingBlock({
 				{!active && tokens ? (
 					<span className="text-violet-400/60">· {tokens} tokens</span>
 				) : null}
-				<ChevronRight
-					className={`ml-auto h-3.5 w-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
-				/>
+				<span className="ml-auto flex items-center gap-1 text-violet-400/70">
+					<span className="hidden sm:inline">{open ? "Hide" : "Read"}</span>
+					<ChevronRight
+						className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+					/>
+				</span>
 			</button>
 			{open && (
 				<div className="border-t border-violet-500/20 px-3 py-2">
 					<pre className="max-h-80 overflow-y-auto whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-slate-400">
-						{text || "…"}
+						{text || (active ? "Working through the problem…" : "")}
+						{active && text ? (
+							<span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-violet-400 align-middle" />
+						) : null}
 					</pre>
 				</div>
 			)}

@@ -208,7 +208,10 @@ export function ChatView({
 										"bg-gradient-to-r from-cyan-600 to-cyan-700 text-slate-950 font-medium shadow-lg shadow-cyan-950/30"
 									:	"bg-slate-900/80 border border-slate-800/90 text-slate-200 shadow-md"
 								}`}>
-								{msg.role === "assistant" && reasoningFor(idx) ? (
+								{msg.role === "assistant" &&
+								(reasoningFor(idx) ||
+									(generation.streamingIndex === idx &&
+										generation.isThinking)) ? (
 									<ThinkingBlock
 										text={reasoningFor(idx)}
 										active={

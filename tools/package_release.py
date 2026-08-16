@@ -8,7 +8,7 @@ Compiles binaries, packages assets, and builds standalone distribution packages:
 import os, sys, shutil, tarfile, subprocess, platform
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VERSION = "1.0.7-beta.1"
+VERSION = "1.0.7-beta.2"
 
 def create_release():
     print(f"=== VaporRAM Release Packager v{VERSION} ===")
