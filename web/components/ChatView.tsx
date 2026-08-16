@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useSyncExternalStore } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -18,12 +18,13 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { VaporMessage, ModelState } from "@/lib/api";
 import {
-	VaporMessage,
-	ModelState,
-	GenerationTimings,
-	streamChatCompletions,
-} from "@/lib/api";
+	subscribe as subscribeGeneration,
+	getSnapshot as generationSnapshot,
+	startGeneration,
+	stopGeneration,
+} from "@/lib/generation";
 
 // Soft visual counters only — the server-side KV cache is the real ceiling.
 const COUNTER_WARN_AT = 10000;
@@ -66,10 +67,17 @@ export function ChatView({
 	modelAvailable = true,
 }: ChatViewProps) {
 	const [input, setInput] = useState("");
-	const [isGenerating, setIsGenerating] = useState(false);
 	const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-	const [lastTimings, setLastTimings] = useState<GenerationTimings | null>(null);
-	const abortControllerRef = useRef<AbortController | null>(null);
+
+	// Generation lives outside React, so switching tabs mid-reply no longer
+	// discards the stop button, the abort handle or the timings.
+	const generation = useSyncExternalStore(
+		subscribeGeneration,
+		generationSnapshot,
+		generationSnapshot,
+	);
+	const isGenerating = generation.isGenerating;
+	const lastTimings = generation.timings;
 	const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
 	const isLoadingWeights = modelState?.status === "loading";
@@ -101,61 +109,17 @@ export function ChatView({
 		const query = (textToSend || input).trim();
 		if (!query || isGenerating) return;
 
-		const userMsg: VaporMessage = { role: "user", content: query };
-		const updatedMessages = [...messages, userMsg];
+		const updatedMessages: VaporMessage[] = [
+			...messages,
+			{ role: "user", content: query },
+		];
 		setMessages(updatedMessages);
 		if (!textToSend) setInput("");
-		setIsGenerating(true);
 
-		// Placeholder assistant message
-		const assistantIndex = updatedMessages.length;
-		setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
-
-		abortControllerRef.current = new AbortController();
-
-		await streamChatCompletions(
-			updatedMessages,
-			preset,
-			(chunk) => {
-				setMessages((prev) => {
-					const next = [...prev];
-					if (next[assistantIndex]) {
-						next[assistantIndex] = {
-							...next[assistantIndex],
-							content: next[assistantIndex].content + chunk,
-						};
-					}
-					return next;
-				});
-			},
-			(timings) => {
-				if (timings) setLastTimings(timings);
-				setIsGenerating(false);
-				abortControllerRef.current = null;
-			},
-			(err) => {
-				console.error("Streaming error:", err);
-				setMessages((prev) => {
-					const next = [...prev];
-					if (next[assistantIndex] && !next[assistantIndex].content) {
-						next[assistantIndex].content =
-							`⚠️ Connection error: ${err.message}. Please verify VaporRAM server is running.`;
-					}
-					return next;
-				});
-				setIsGenerating(false);
-				abortControllerRef.current = null;
-			},
-			abortControllerRef.current.signal,
-		);
+		await startGeneration(updatedMessages, preset, setMessages);
 	};
 
-	const handleStop = () => {
-		if (abortControllerRef.current) {
-			abortControllerRef.current.abort();
-			setIsGenerating(false);
-		}
-	};
+	const handleStop = () => stopGeneration();
 
 	const copyToClipboard = (text: string, idx: number) => {
 		navigator.clipboard.writeText(text);

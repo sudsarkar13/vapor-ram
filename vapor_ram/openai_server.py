@@ -535,6 +535,9 @@ def telemetry_snapshot():
             # gemma-4-E4B-it-Q4_K_M is ~61 MB.
             "layer_buffer_mb": measured_layer_buffer_mb(),
         },
+        "n_threads": optimal_thread_count(),
+        "physical_cores": physical_core_count(),
+        "logical_cores": os.cpu_count(),
         "ram_ceiling_gb": ram_ceiling_gb,
         "total_ram_gb": round(total, 2),
         "avail_ram_gb": round(avail, 2),

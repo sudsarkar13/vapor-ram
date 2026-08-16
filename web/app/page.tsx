@@ -8,6 +8,7 @@ import { BrainView } from "@/components/BrainView";
 import { ProfilingView } from "@/components/ProfilingView";
 import { DoctorView } from "@/components/DoctorView";
 import { ApiKeyGate } from "@/components/ApiKeyGate";
+import { resetGeneration } from "@/lib/generation";
 import {
 	fetchHealth,
 	fetchProgress,
@@ -63,6 +64,9 @@ export default function VaporDashboardPage() {
 
 	const handleClearChat = () => {
 		setMessages([]);
+		// Drop the previous run's token/timing figures with the transcript;
+		// resetGeneration is a no-op while a reply is still streaming.
+		resetGeneration();
 	};
 
 	return (

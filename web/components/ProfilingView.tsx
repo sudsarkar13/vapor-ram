@@ -6,54 +6,27 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
-interface StatsPayload {
-	version: string;
-	model: string;
-	backend: string;
-	kv_slots: number;
-	process_rss_mb: number | null;
-	ram_usage_percent: number | null;
-	total_ram_gb: number;
-	avail_ram_gb: number;
-	n_ctx: number;
-	model_available: boolean;
-	timings: {
-		wall_time_ms?: number;
-		first_token_ms?: number | null;
-		completion_tokens?: number | null;
-		tokens_per_second?: number | null;
-	};
-}
-
-const getBaseUrl = () =>
-	typeof window !== "undefined" && window.location.port === "3000"
-		? "http://localhost:8000"
-		: "";
+// Uses the shared client rather than a private fetch: the local copy never
+// sent the API key, so on a shared server this tab answered 401 and rendered
+// empty while every other tab worked.
+import { fetchCortex, CortexReport } from "@/lib/api";
 
 export function ProfilingView() {
-	const [stats, setStats] = useState<StatsPayload | null>(null);
+	const [stats, setStats] = useState<CortexReport | null>(null);
 	const [loading, setLoading] = useState(false);
 
 	const load = useCallback(async () => {
 		setLoading(true);
-		try {
-			const res = await fetch(`${getBaseUrl()}/v1/stats`, { cache: "no-store" });
-			if (res.ok) setStats(await res.json());
-		} catch {
-			setStats(null);
-		}
+		const r = await fetchCortex();
+		if (r) setStats(r);
 		setLoading(false);
 	}, []);
 
 	useEffect(() => {
 		let cancelled = false;
 		const tick = async () => {
-			try {
-				const res = await fetch(`${getBaseUrl()}/v1/stats`, { cache: "no-store" });
-				if (!cancelled) setStats(res.ok ? await res.json() : null);
-			} catch {
-				if (!cancelled) setStats(null);
-			}
+			const r = await fetchCortex();
+			if (!cancelled) setStats(r);
 		};
 		tick();
 		const id = setInterval(tick, 5000);
@@ -84,14 +57,36 @@ export function ProfilingView() {
 			sub: stats ? `of ${stats.total_ram_gb.toFixed(1)} GB total` : "",
 		},
 		{
-			label: "KV cache slots",
-			value: stats ? stats.kv_slots.toLocaleString() : "—",
-			sub: `context window ${stats?.n_ctx.toLocaleString() ?? "—"} tokens`,
+			// Previously labelled "KV cache slots" while showing n_ctx. Those are
+			// tokens; the slot count is separate and is 1 in single-tenant mode.
+			label: "Context window",
+			value: stats ? stats.n_ctx.toLocaleString() : "—",
+			sub: stats
+				? `${stats.slots.active}/${stats.slots.total} KV slot${stats.slots.total === 1 ? "" : "s"} in use`
+				: "",
+		},
+		{
+			label: "Threads",
+			value: stats ? String(stats.n_threads) : "—",
+			sub: stats
+				? `${stats.physical_cores} physical of ${stats.logical_cores ?? "?"} logical`
+				: "",
 		},
 		{
 			label: "Throughput",
 			value: t.tokens_per_second != null ? `${t.tokens_per_second.toFixed(1)} tok/s` : "—",
 			sub: hasRun ? "from last generation" : "no generation recorded yet",
+		},
+		{
+			label: "Weights streamed",
+			value:
+				stats?.stream_benchmark?.mb_per_s != null
+					? `${stats.stream_benchmark.mb_per_s.toFixed(0)} MB/s`
+					: "—",
+			sub:
+				stats?.stream_benchmark?.mb_per_s != null
+					? `O_DIRECT, ${stats.stream_benchmark.layers_read} blocks`
+					: "not measured — run it from Brain Cortex",
 		},
 	];
 
@@ -118,7 +113,7 @@ export function ProfilingView() {
 				</Button>
 			</div>
 
-			<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+			<div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4">
 				{metrics.map((m) => (
 					<Card key={m.label} className="bg-slate-900/60 border-slate-800">
 						<CardHeader className="pb-1.5">
@@ -188,9 +183,11 @@ export function ProfilingView() {
 				<CardContent className="p-4 text-[11px] text-slate-400 leading-relaxed flex gap-2">
 					<Info className="h-4 w-4 text-amber-400 shrink-0 mt-px" />
 					<span>
-						Figures here are measured at runtime. Per-kernel attribution (attention
-						vs. matmul vs. LM head) is not instrumented in the current GGUF backend,
-						so it is not reported rather than estimated.
+						Every figure here is measured: RSS from the process, thread count from
+						the CPU topology, throughput and timings from the last generation,
+						and streaming bandwidth from a real O_DIRECT run. Per-kernel
+						attribution (attention vs. matmul vs. LM head) is not instrumented
+						in the GGUF backend, so it is omitted rather than estimated.
 					</span>
 				</CardContent>
 			</Card>

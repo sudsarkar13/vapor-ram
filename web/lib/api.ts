@@ -43,6 +43,10 @@ export interface Telemetry {
 	safe_max_context: number;
 	min_context: number;
 	architecture: ModelArchitecture;
+	/** Threads llama.cpp is actually using, and the topology they came from. */
+	n_threads: number;
+	physical_cores: number;
+	logical_cores: number | null;
 	ram_ceiling_gb: number;
 	total_ram_gb: number;
 	avail_ram_gb: number;
