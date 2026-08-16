@@ -77,13 +77,28 @@ const FALLBACK_ARCH: ModelArchitecture = {
 	layer_buffer_mb: 140,
 };
 
-const BYTES_PER_KV_ELEMENT = 1; // int8 K/V
+// llama.cpp allocates K and V separately, in f16 unless type_k/type_v are
+// overridden -- not the int8 the planning docs assume. Measured against the
+// running engine: n_ctx 4096 -> 6.80 GB RSS, 16384 -> 8.07 GB, i.e. ~108 KB
+// per token. The previous constants counted K only, at 1 byte, over just the
+// unique-KV layers, and so under-reported the cache by roughly 8x (216 MB
+// shown against ~1.7 GB actually allocated at 16384).
+const BYTES_PER_KV_ELEMENT = 2; // f16 K/V, llama.cpp default
+const KV_TENSORS = 2; // K and V
 const KV_SCALE_OVERHEAD = 1.125;
 
 function kvBytes(ctx: number, arch: ModelArchitecture): number {
-	const uniqueKvLayers = Math.max(1, arch.n_layers - arch.kv_shared_layers);
-	const elementsPerToken = uniqueKvLayers * arch.n_kv_heads * arch.head_dim;
-	return ctx * elementsPerToken * BYTES_PER_KV_ELEMENT * KV_SCALE_OVERHEAD;
+	// Every layer is counted, not just the unique-KV ones: llama.cpp reports
+	// "using full-size SWA cache" for this architecture, so the sliding-window
+	// layers are allocated at full context too.
+	const elementsPerToken = arch.n_layers * arch.n_kv_heads * arch.head_dim;
+	return (
+		ctx *
+		elementsPerToken *
+		KV_TENSORS *
+		BYTES_PER_KV_ELEMENT *
+		KV_SCALE_OVERHEAD
+	);
 }
 
 function formatBytes(bytes: number): string {
@@ -422,8 +437,8 @@ export function Sidebar({
 				</div>
 
 				<p className="text-[10px] text-slate-500 leading-snug">
-					KV estimate uses the active model&apos;s real geometry: {arch.n_layers} layers,{" "}
-					{arch.n_layers - arch.kv_shared_layers} unique KV, {arch.n_kv_heads} KV heads
+					KV estimate uses the active model&apos;s real geometry: {arch.n_layers} layers
+					(full-size SWA cache), {arch.n_kv_heads} KV heads
 					&times; {arch.head_dim}.
 				</p>
 

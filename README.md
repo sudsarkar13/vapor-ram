@@ -213,6 +213,36 @@ You can customize execution using presets or flags:
 | `./vapor stop` | Stop a running server from another terminal |
 | `./vapor lan` | Show this machine's LAN address |
 
+### Performance
+
+Measured on a Ryzen 7 5700U (8 physical cores / 16 threads, 15 GB RAM) with
+`gemma-4-E4B-it-Q4_K_M.gguf`, 32 decoded tokens per run:
+
+| Threads | `n_ctx` | Decode | Peak RSS |
+| ---: | ---: | ---: | ---: |
+| 16 | 16384 | 1.96 tok/s | 8.07 GB |
+| 16 | 4096 | 1.88 tok/s | 7.18 GB |
+| **8** | 16384 | 6.49 tok/s | 8.07 GB |
+| **8** | 4096 | **6.42–6.77 tok/s** | 6.80 GB |
+| 6 | 4096 | 6.69–6.79 tok/s | 7.18 GB |
+| 4 | 4096 | 6.25 tok/s | 7.18 GB |
+
+Two things follow:
+
+- **Thread count dominates.** One thread per hyperthread is ~3.4x slower than
+  one per physical core, because llama.cpp's kernels already saturate each
+  core's vector units. VaporRAM now defaults to physical cores; 4, 6 and 8 are
+  within noise of each other, so there is little to gain by tuning further.
+  `VAPOR_N_THREADS` overrides it.
+- **Context size costs memory, not speed.** Decode throughput is unchanged
+  between 4096 and 16384, but the KV cache grows ~1.3 GB. Pick the smallest
+  window your conversations need — on a 16 GB machine, 16384 leaves little
+  room for a browser and an editor, and once the host starts swapping,
+  throughput falls much further than these figures suggest.
+
+The weights are preloaded when the server starts, so the first message does not
+pay the ~5-9s load on top of its own generation.
+
 ### Stopping the Server
 
 CTRL+C stops the server, including while the engine is mid-generation.
