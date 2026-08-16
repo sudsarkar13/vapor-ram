@@ -17,6 +17,7 @@ import {
 	AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ThinkingBlock } from "@/components/ThinkingBlock";
 import { Textarea } from "@/components/ui/textarea";
 import { VaporMessage, ModelState } from "@/lib/api";
 import {
@@ -78,6 +79,13 @@ export function ChatView({
 	);
 	const isGenerating = generation.isGenerating;
 	const lastTimings = generation.timings;
+
+	// Reasoning for a given assistant message: live while it streams, then from
+	// the kept map so it stays readable in the transcript afterwards.
+	const reasoningFor = (idx: number) =>
+		generation.streamingIndex === idx
+			? generation.reasoning
+			: (generation.reasoningByIndex[idx] ?? "");
 	const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
 	const isLoadingWeights = modelState?.status === "loading";
@@ -200,10 +208,34 @@ export function ChatView({
 										"bg-gradient-to-r from-cyan-600 to-cyan-700 text-slate-950 font-medium shadow-lg shadow-cyan-950/30"
 									:	"bg-slate-900/80 border border-slate-800/90 text-slate-200 shadow-md"
 								}`}>
+								{msg.role === "assistant" && reasoningFor(idx) ? (
+									<ThinkingBlock
+										text={reasoningFor(idx)}
+										active={
+											generation.streamingIndex === idx &&
+											generation.isThinking
+										}
+										durationMs={
+											generation.streamingIndex === idx
+												? null
+												: lastTimings?.first_answer_ms
+										}
+										tokens={
+											generation.streamingIndex === idx
+												? null
+												: lastTimings?.reasoning_tokens
+										}
+									/>
+								) : null}
+
 								{msg.role === "user" ?
 									<p className="whitespace-pre-wrap">{msg.content}</p>
 								: isStreamingAssistant(idx) && !msg.content ?
-									isLoadingWeights ?
+									// While reasoning streams the block above already shows
+									// activity, so don't also show the generic typing dots.
+									generation.isThinking && generation.streamingIndex === idx ?
+										null
+									: isLoadingWeights ?
 										<LoadingWeights
 											message={modelState?.message || "Loading model weights…"}
 										/>

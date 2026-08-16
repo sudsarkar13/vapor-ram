@@ -217,6 +217,34 @@ You can customize execution using presets or flags:
 | `./vapor stop` | Stop a running server from another terminal |
 | `./vapor lan` | Show this machine's LAN address |
 
+### Reasoning
+
+`gemma-4-E4B-it` supports reasoning natively: its chat template takes an
+`enable_thinking` flag, injects `<|think|>` at the top of the system turn, and
+emits the thought process inside `<|channel>thought … <channel|>` before the
+answer. VaporRAM enables it by default when the active model's template
+supports it, and detects that by reading the template out of the GGUF rather
+than assuming.
+
+In the dashboard, reasoning appears above each reply as a collapsed
+**Thinking** block that animates while it streams; click it to read the
+working-out. The sidebar has a switch, and the CLI has flags:
+
+```bash
+vapor serve --no-think          # reasoning off for this server
+vapor run --think "..."         # reasoning for one prompt
+vapor chat                      # /think toggles mid-session
+```
+
+Per request, send `{"thinking": false}` in the body. Over the API, reasoning
+streams on its own `delta.reasoning_content` field, so a client that does not
+know about it renders the answer alone rather than mixing the two.
+
+Two things worth knowing. Reasoning shares the `max_tokens` budget with the
+answer, and on a hard question it can consume all of it — VaporRAM detects that
+and says so rather than returning an empty reply. And the model decides whether
+a question warrants reasoning: simple prompts are answered directly.
+
 ### Weight Layout & Streaming
 
 The **Brain Cortex** tab reads the GGUF tensor directory directly, so every

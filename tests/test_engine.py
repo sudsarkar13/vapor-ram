@@ -147,8 +147,10 @@ def test_unit_logic():
           "earlier turns dropped")
     check("prompt applies preset system instruction",
           "expert software engineer" in prompt, "system_instruction missing")
-    check("prompt ends on model turn", prompt.rstrip().endswith("<start_of_turn>model"),
-          "missing generation cue")
+    # <start_of_turn> is not in this model's vocabulary; the real marker is <|turn>.
+    check("prompt ends on model turn",
+          prompt.rstrip().endswith(f"{s.TURN_OPEN}model"),
+          f"missing generation cue: {prompt[-40:]!r}")
 
     # `Preset: x` system markers are routing metadata, not instructions.
     resolved = s.resolve_preset(None, [{"role": "system", "content": "Preset: concise"}])
@@ -465,6 +467,84 @@ def test_gguf_and_streaming():
           bench.get("seconds_per_token_if_streamed", 0) > 0)
 
 
+def test_thinking_mode():
+    """Reasoning: prompt format, stream splitting and the toggle."""
+    print("\n\033[1;36m[12] Reasoning / Thinking Mode\033[0m")
+    from vapor_ram import openai_server as s
+
+    # Control tokens must be the ones actually in this model's vocabulary.
+    check("turn markers are the model's real tokens",
+          s.TURN_OPEN == "<|turn>" and s.TURN_CLOSE == "<turn|>",
+          f"{s.TURN_OPEN} / {s.TURN_CLOSE}")
+    check("stop sequences use real tokens",
+          "<end_of_turn>" not in s.STOP_SEQUENCES
+          and "<start_of_turn>" not in s.STOP_SEQUENCES,
+          str(s.STOP_SEQUENCES))
+
+    prompt = s.build_prompt([{"role": "user", "content": "hi"}],
+                            s.PRESETS["default"], enable_thinking=True)
+    check("thinking prompt opens a system turn",
+          prompt.startswith(f"{s.TURN_OPEN}system\n"), prompt[:40])
+    check("thinking token sits at the top of the system turn",
+          f"{s.TURN_OPEN}system\n{s.THINK_TOKEN}" in prompt, prompt[:60])
+    check("prompt ends on a model turn",
+          prompt.endswith(f"{s.TURN_OPEN}model\n"), prompt[-30:])
+
+    off = s.build_prompt([{"role": "user", "content": "hi"}],
+                         s.PRESETS["default"], enable_thinking=False)
+    check("thinking token absent when disabled", s.THINK_TOKEN not in off, off[:60])
+
+    # A system instruction now uses the real system turn instead of being
+    # folded into the first user message.
+    coded = s.build_prompt([{"role": "user", "content": "hi"}],
+                           s.PRESETS["coder"], enable_thinking=False)
+    check("system instruction uses the system turn",
+          coded.startswith(f"{s.TURN_OPEN}system\n")
+          and "software engineer" in coded.split(s.TURN_CLOSE)[0])
+
+    # Prior reasoning must not be replayed into the prompt.
+    hist = s.build_prompt([
+        {"role": "user", "content": "a"},
+        {"role": "assistant",
+         "content": f"{s.CHANNEL_OPEN}thought\nSECRET_REASONING{s.CHANNEL_CLOSE}Visible."},
+        {"role": "user", "content": "b"},
+    ], s.PRESETS["default"], enable_thinking=False)
+    check("earlier reasoning is stripped from history",
+          "SECRET_REASONING" not in hist and "Visible." in hist, hist[:200])
+
+    check("strip_thinking removes channel blocks",
+          s.strip_thinking(f"A{s.CHANNEL_OPEN}thought\nx{s.CHANNEL_CLOSE}B") == "AB",
+          s.strip_thinking(f"A{s.CHANNEL_OPEN}thought\nx{s.CHANNEL_CLOSE}B"))
+
+    # The splitter must survive markers arriving across chunk boundaries.
+    sp = s.ThinkingSplitter()
+    out = []
+    for piece in ["Hi ", "<|cha", "nnel>thou", "ght\nreason A", "reason B",
+                  "<chan", "nel|>Answer."]:
+        out.extend(sp.feed(piece))
+    out.extend(sp.flush())
+    thinking = "".join(t for c, t in out if c == "thinking")
+    content = "".join(t for c, t in out if c == "content")
+    check("splitter separates reasoning from answer",
+          thinking == "reason Areason B" and content == "Hi Answer.",
+          f"thinking={thinking!r} content={content!r}")
+    check("no channel markers leak into the answer",
+          s.CHANNEL_OPEN not in content and s.CHANNEL_CLOSE not in content, content)
+
+    sp2 = s.ThinkingSplitter()
+    sp2.feed(f"{s.CHANNEL_OPEN}thought\nunfinished")
+    check("unterminated reasoning is flagged as in-thought", sp2.in_thought)
+
+    check("_as_bool parses the shapes clients send",
+          s._as_bool("true", False) and not s._as_bool("off", True)
+          and s._as_bool(1, False) and s._as_bool("nonsense", True))
+
+    check("thinking support is detected from the model's template",
+          isinstance(s.detect_thinking_support(), bool))
+    check("thinking state is exposed in telemetry",
+          {"thinking_enabled", "thinking_supported"} <= set(s.telemetry_snapshot()))
+
+
 def test_network_sharing():
     """Authenticated sharing. Runs last: enabling auth flips module-level state
     that every other server in this process shares."""
@@ -634,6 +714,7 @@ def main():
     test_generation_without_weights(port)
     test_performance_settings()
     test_gguf_and_streaming()
+    test_thinking_mode()
     test_network_sharing()
 
     print("\n" + "=" * 60)

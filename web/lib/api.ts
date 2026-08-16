@@ -47,6 +47,9 @@ export interface Telemetry {
 	n_threads: number;
 	physical_cores: number;
 	logical_cores: number | null;
+	/** Reasoning: whether it is on, and whether the model supports it at all. */
+	thinking_enabled: boolean;
+	thinking_supported: boolean;
 	ram_ceiling_gb: number;
 	total_ram_gb: number;
 	avail_ram_gb: number;
@@ -208,7 +211,10 @@ export interface CortexReport extends Telemetry {
 export interface GenerationTimings {
 	wall_time_ms?: number;
 	first_token_ms?: number | null;
+	/** When reasoning ran, the answer starts later than the first token. */
+	first_answer_ms?: number | null;
 	completion_tokens?: number | null;
+	reasoning_tokens?: number | null;
 	tokens_per_second?: number | null;
 }
 
@@ -390,6 +396,7 @@ export const downloadModel = (repo?: string, dest?: string) =>
 export const updateServerConfig = (params: {
 	ram_ceiling_gb?: number;
 	n_ctx?: number;
+	thinking?: boolean;
 	/** Only send this when the user actually intends to change the model directory. */
 	model_dir?: string;
 }) => postJson<ServerConfig>("/v1/system/config", params, "config update");
@@ -415,6 +422,7 @@ export async function streamChatCompletions(
 	onComplete: (timings?: GenerationTimings) => void,
 	onError: (err: Error) => void,
 	signal?: AbortSignal,
+	onReasoning?: (text: string) => void,
 ) {
 	try {
 		const response = await fetch(`${getBaseUrl()}/v1/chat/completions`, {
@@ -472,6 +480,8 @@ export async function streamChatCompletions(
 				try {
 					const parsed = JSON.parse(dataStr);
 					const choice = parsed?.choices?.[0];
+					const reasoning = choice?.delta?.reasoning_content;
+					if (reasoning && onReasoning) onReasoning(reasoning);
 					const content = choice?.delta?.content;
 					if (content) onChunk(content);
 					if (parsed?.timings) timings = parsed.timings;

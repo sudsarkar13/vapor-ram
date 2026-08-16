@@ -24,6 +24,12 @@ export interface GenerationState {
 	/** Index of the assistant message currently being written, if any. */
 	streamingIndex: number | null;
 	error: string | null;
+	/** Reasoning for the message at streamingIndex, accumulated as it streams. */
+	reasoning: string;
+	/** True while reasoning is arriving and the answer has not started. */
+	isThinking: boolean;
+	/** Reasoning for each completed assistant message, by message index. */
+	reasoningByIndex: Record<number, string>;
 }
 
 const IDLE: GenerationState = {
@@ -31,6 +37,9 @@ const IDLE: GenerationState = {
 	timings: null,
 	streamingIndex: null,
 	error: null,
+	reasoning: "",
+	isThinking: false,
+	reasoningByIndex: {},
 };
 
 let state: GenerationState = IDLE;
@@ -78,17 +87,31 @@ export async function startGeneration(
 		streamingIndex: assistantIndex,
 		error: null,
 		timings: null,
+		reasoning: "",
+		isThinking: false,
 	});
 
 	const finish = (patch: Partial<GenerationState>) => {
 		controller = null;
-		setState({ isGenerating: false, streamingIndex: null, ...patch });
+		// Reasoning is kept against the message index so it stays readable in
+		// the transcript after the run, not just while it is streaming.
+		const kept = state.reasoning
+			? { ...state.reasoningByIndex, [assistantIndex]: state.reasoning }
+			: state.reasoningByIndex;
+		setState({
+			isGenerating: false,
+			streamingIndex: null,
+			isThinking: false,
+			reasoningByIndex: kept,
+			...patch,
+		});
 	};
 
 	await streamChatCompletions(
 		history,
 		preset,
 		(chunk) => {
+			if (state.isThinking) setState({ isThinking: false });
 			setMessages((prev) => {
 				const next = [...prev];
 				const current = next[assistantIndex];
@@ -117,6 +140,7 @@ export async function startGeneration(
 			finish({ error: err.message });
 		},
 		controller.signal,
+		(piece) => setState({ reasoning: state.reasoning + piece, isThinking: true }),
 	);
 }
 

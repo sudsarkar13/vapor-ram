@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import {
+	Brain,
 	HardDrive,
 	Download,
 	RefreshCw,
@@ -154,6 +155,7 @@ export function Sidebar({
 	const [busy, setBusy] = useState(false);
 	const [statusMsg, setStatusMsg] = useState("");
 	const [statusIsError, setStatusIsError] = useState(false);
+	const [thinkingBusy, setThinkingBusy] = useState(false);
 
 	const arch = progress?.architecture ?? FALLBACK_ARCH;
 	const totalHostRamGb = progress?.total_ram_gb ?? 16.0;
@@ -198,6 +200,17 @@ export function Sidebar({
 		setStatusMsg(msg);
 		setStatusIsError(isError);
 	};
+
+	const handleToggleThinking = useCallback(async () => {
+		setThinkingBusy(true);
+		const next = !progress?.thinking_enabled;
+		const res = await updateServerConfig({ thinking: next });
+		setThinkingBusy(false);
+		if (!res) return report("Server unreachable — reasoning unchanged.", true);
+		report(res.message || `Reasoning ${next ? "enabled" : "disabled"}.`,
+			!!res.warnings?.length);
+		onRefreshHealth();
+	}, [progress?.thinking_enabled, onRefreshHealth]);
 
 	const saveSetting = useCallback(
 		async (params: { n_ctx?: number; ram_ceiling_gb?: number }) => {
@@ -583,6 +596,42 @@ export function Sidebar({
 					</div>
 				)}
 			</div>
+
+			{/* Reasoning toggle — only offered when the model's chat template
+			    actually implements a thinking channel. */}
+			{progress?.thinking_supported && (
+				<div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-2">
+					<div className="flex items-center justify-between gap-2">
+						<label
+							htmlFor="thinking-toggle"
+							className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+							<Brain className="h-4 w-4 text-violet-400" />
+							Reasoning
+						</label>
+						<button
+							id="thinking-toggle"
+							type="button"
+							role="switch"
+							aria-checked={!!progress?.thinking_enabled}
+							disabled={thinkingBusy}
+							onClick={handleToggleThinking}
+							className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+								progress?.thinking_enabled ? "bg-violet-500" : "bg-slate-700"
+							}`}>
+							<span
+								className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+									progress?.thinking_enabled ? "translate-x-4.5" : "translate-x-0.5"
+								}`}
+							/>
+						</button>
+					</div>
+					<p className="text-[10px] leading-snug text-slate-500">
+						{progress?.thinking_enabled
+							? "The model works through the problem before answering. Its reasoning appears above each reply and can be expanded."
+							: "The model answers directly. Reasoning usually improves harder questions but costs tokens and time."}
+					</p>
+				</div>
+			)}
 
 			{/* Persona presets — sourced from presets/*.json via the server */}
 			<div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-3">

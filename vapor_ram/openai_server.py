@@ -25,6 +25,15 @@ MIN_CONTEXT_WINDOW = 512
 DEFAULT_CONTEXT_WINDOW = 8192
 
 VERSION = "1.0.7-beta.1"
+
+# Reasoning is on by default: this model supports it natively and the answers
+# are better for it. Operators can turn it off globally, and callers can
+# override per request.
+THINKING_ENABLED = True
+
+# Set from the active GGUF: true when the model's own chat template understands
+# the thinking channel. Without it, turning the switch on would do nothing.
+THINKING_SUPPORTED = False
 MODEL_ID = "google/gemma-4-E4B-it"
 
 # --- Network sharing -------------------------------------------------------
@@ -302,6 +311,11 @@ except Exception:
 n_ctx, _ = clamp_context(n_ctx)
 
 try:
+    THINKING_ENABLED = bool(_vapor_cfg.get("enable_thinking", True))
+except Exception:
+    THINKING_ENABLED = True
+
+try:
     from . import doctor
 except Exception:
     doctor = None
@@ -436,7 +450,8 @@ def save_active_config():
             "model_id": MODEL_ID,
             "model_dir": portable_model_dir(current_model_path),
             "ram_ceiling_gb": ram_ceiling_gb,
-            "n_ctx": n_ctx
+            "n_ctx": n_ctx,
+            "enable_thinking": THINKING_ENABLED,
         }
         with open(VAPOR_CONFIG_PATH, "w") as f:
             json.dump(cfg, f, indent=2)
@@ -535,6 +550,8 @@ def telemetry_snapshot():
             # gemma-4-E4B-it-Q4_K_M is ~61 MB.
             "layer_buffer_mb": measured_layer_buffer_mb(),
         },
+        "thinking_enabled": THINKING_ENABLED,
+        "thinking_supported": THINKING_SUPPORTED,
         "n_threads": optimal_thread_count(),
         "physical_cores": physical_core_count(),
         "logical_cores": os.cpu_count(),
@@ -547,6 +564,32 @@ def telemetry_snapshot():
         "model_state": state,
         "slots": _slot_snapshot(current_model_path),
     }
+
+
+def detect_thinking_support(gguf_path=None):
+    """True when the model's own chat template implements a thinking channel.
+
+    Read from the GGUF rather than assumed: gemma-4-E4B-it's template takes an
+    `enable_thinking` flag, injects <|think|> at the top of the first system
+    turn, and emits reasoning inside <|channel>thought ... <channel|>. A model
+    without that would ignore the token, so the switch is disabled rather than
+    offered as a control that does nothing.
+    """
+    global THINKING_SUPPORTED
+    if cortex is None:
+        return THINKING_SUPPORTED
+    try:
+        path = gguf_path or find_gguf(current_model_path)
+        if not path:
+            return THINKING_SUPPORTED
+        from .gguf import read_gguf
+        template = read_gguf(path)["metadata"].get("tokenizer.chat_template") or ""
+        THINKING_SUPPORTED = ("enable_thinking" in template
+                              and THINK_TOKEN in template
+                              and CHANNEL_OPEN in template)
+    except Exception:
+        pass
+    return THINKING_SUPPORTED
 
 
 def measured_layer_buffer_mb():
@@ -694,12 +737,139 @@ def resolve_preset(preset_id, messages):
     return PRESETS["default"]
 
 
-def build_prompt(messages, preset):
-    """Render the full conversation into Gemma's instruction format.
+# Control tokens verified against the GGUF vocabulary of gemma-4-E4B-it.
+# The previously used <start_of_turn>/<end_of_turn> are NOT in this model's
+# vocabulary at all -- they tokenised as literal text, so every prompt was
+# malformed and the stop sequences never matched anything.
+TURN_OPEN = "<|turn>"      # token 105
+TURN_CLOSE = "<turn|>"     # token 106, also the EOS token
+THINK_TOKEN = "<|think|>"  # token 98
+CHANNEL_OPEN = "<|channel>"    # token 100
+CHANNEL_CLOSE = "<channel|>"   # token 101
+THOUGHT_CHANNEL = "thought"
 
-    The whole history is included (trimmed to the newest turns that fit), so
-    follow-up questions actually see what came before.
+STOP_SEQUENCES = [TURN_CLOSE, TURN_OPEN]
+
+
+def strip_thinking(text):
+    """Drop <|channel>...<channel|> blocks, mirroring the chat template's macro.
+
+    Reasoning from earlier turns is not replayed into the prompt; the model's
+    own template strips it, and feeding it back changes the distribution.
     """
+    result = []
+    for part in str(text).split(CHANNEL_CLOSE):
+        if CHANNEL_OPEN in part:
+            result.append(part.split(CHANNEL_OPEN)[0])
+        else:
+            result.append(part)
+    return "".join(result).strip()
+
+
+class ThinkingSplitter:
+    """Splits a token stream into reasoning and answer text.
+
+    With thinking enabled the model emits `<|channel>thought\n...\n<channel|>`
+    before its reply. Markers can straddle chunk boundaries, so partial tails
+    are held back rather than leaked into the visible answer.
+    """
+
+    def __init__(self):
+        self.buffer = ""
+        self.in_thought = False
+        self.saw_thought = False
+
+    def _longest_partial_suffix(self, text, marker):
+        limit = min(len(text), len(marker) - 1)
+        for size in range(limit, 0, -1):
+            if marker.startswith(text[-size:]):
+                return size
+        return 0
+
+    def feed(self, chunk):
+        """Yield (channel, text) pairs, channel being 'thinking' or 'content'."""
+        self.buffer += chunk
+        out = []
+        while self.buffer:
+            if self.in_thought:
+                idx = self.buffer.find(CHANNEL_CLOSE)
+                if idx == -1:
+                    hold = self._longest_partial_suffix(self.buffer, CHANNEL_CLOSE)
+                    emit = self.buffer[:len(self.buffer) - hold] if hold else self.buffer
+                    if emit:
+                        out.append(("thinking", emit))
+                    self.buffer = self.buffer[len(emit):]
+                    break
+                if idx:
+                    out.append(("thinking", self.buffer[:idx]))
+                self.buffer = self.buffer[idx + len(CHANNEL_CLOSE):]
+                self.in_thought = False
+                continue
+
+            idx = self.buffer.find(CHANNEL_OPEN)
+            if idx == -1:
+                hold = self._longest_partial_suffix(self.buffer, CHANNEL_OPEN)
+                emit = self.buffer[:len(self.buffer) - hold] if hold else self.buffer
+                if emit:
+                    out.append(("content", emit))
+                self.buffer = self.buffer[len(emit):]
+                break
+            if idx:
+                out.append(("content", self.buffer[:idx]))
+            rest = self.buffer[idx + len(CHANNEL_OPEN):]
+            # The channel name and its newline precede the reasoning body.
+            newline = rest.find("\n")
+            if newline == -1:
+                # Name not fully arrived yet; wait for more input.
+                self.buffer = self.buffer[idx:]
+                break
+            self.buffer = rest[newline + 1:]
+            self.in_thought = True
+            self.saw_thought = True
+        return out
+
+    def flush(self):
+        """Emit anything still held once the stream ends."""
+        if not self.buffer:
+            return []
+        channel = "thinking" if self.in_thought else "content"
+        out = [(channel, self.buffer)]
+        self.buffer = ""
+        return out
+
+
+def _as_bool(value, fallback):
+    """Accept the several shapes clients use for a boolean flag."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("1", "true", "yes", "on", "enabled"):
+            return True
+        if lowered in ("0", "false", "no", "off", "disabled"):
+            return False
+    return fallback
+
+
+def build_prompt(messages, preset, enable_thinking=None):
+    """Render the conversation in gemma-4-E4B-it's real instruction format.
+
+    Structure comes from the chat template embedded in the GGUF:
+
+        <|turn>system\n[<|think|>\n]{system}<turn|>\n
+        <|turn>user\n{text}<turn|>\n
+        <|turn>model\n{text}<turn|>\n
+        <|turn>model\n
+
+    This model has a real system turn, so the instruction is no longer folded
+    into the first user message. Reasoning from earlier assistant turns is
+    stripped, matching the template's own strip_thinking macro.
+    """
+    if enable_thinking is None:
+        enable_thinking = THINKING_ENABLED
+
     system_parts = []
     if preset.get("system_instruction"):
         system_parts.append(preset["system_instruction"])
@@ -718,28 +888,30 @@ def build_prompt(messages, preset):
     total = sum(len(p) for p in system_parts)
     for msg in reversed(turns):
         content = str(msg.get("content", "")).strip()
+        if msg["role"] == "assistant":
+            content = strip_thinking(content)
         if not content:
             continue
-        block = (f"<start_of_turn>user\n{content}<end_of_turn>\n"
-                 if msg["role"] == "user" else
-                 f"<start_of_turn>model\n{content}<end_of_turn>\n")
+        role = "user" if msg["role"] == "user" else "model"
+        block = f"{TURN_OPEN}{role}\n{content}{TURN_CLOSE}\n"
         if total + len(block) > char_budget and rendered:
             break
         total += len(block)
         rendered.append(block)
     rendered.reverse()
 
+    # The system turn is emitted when there is an instruction to carry or when
+    # thinking is on, because <|think|> belongs at the top of that turn.
     prefix = ""
-    if system_parts:
-        prefix = "<start_of_turn>user\n" + "\n\n".join(system_parts) + "<end_of_turn>\n"
-        if rendered and rendered[0].startswith("<start_of_turn>user\n"):
-            # Fold the system instruction into the first user turn — Gemma has no
-            # separate system role.
-            body = rendered[0][len("<start_of_turn>user\n"):]
-            rendered[0] = "<start_of_turn>user\n" + "\n\n".join(system_parts) + "\n\n" + body
-            prefix = ""
+    if enable_thinking or system_parts:
+        prefix = f"{TURN_OPEN}system\n"
+        if enable_thinking:
+            prefix += f"{THINK_TOKEN}\n"
+        if system_parts:
+            prefix += "\n\n".join(p.strip() for p in system_parts)
+        prefix += f"{TURN_CLOSE}\n"
 
-    return prefix + "".join(rendered) + "<start_of_turn>model\n"
+    return prefix + "".join(rendered) + f"{TURN_OPEN}model\n"
 
 
 def get_llama(gguf_file):
@@ -815,7 +987,7 @@ def get_llama(gguf_file):
     return llm
 
 
-def generate_tokens(messages, preset, sampling, max_tokens):
+def generate_tokens(messages, preset, sampling, max_tokens, enable_thinking=None):
     """Yield generated text pieces as llama.cpp decodes them.
 
     This is a generator: the caller can forward each piece to the client immediately.
@@ -826,7 +998,7 @@ def generate_tokens(messages, preset, sampling, max_tokens):
             f"No .gguf weights found in '{current_model_path}'. "
             f"Download the model from the dashboard or run: ./vapor download")
 
-    prompt = build_prompt(messages, preset)
+    prompt = build_prompt(messages, preset, enable_thinking=enable_thinking)
 
     # llama.cpp keeps one mutable context per model; concurrent generations would
     # corrupt it. Poll endpoints run on other threads and are unaffected.
@@ -839,13 +1011,29 @@ def generate_tokens(messages, preset, sampling, max_tokens):
                 max_tokens=max_tokens,
                 temperature=sampling.get("temperature", 0.2),
                 top_p=sampling.get("top_p", 0.95),
-                stop=["<end_of_turn>", "<start_of_turn>", "<|endoftext|>"],
+                # Real stop tokens for this model. The previous list used
+                # <end_of_turn>/<start_of_turn>, which are not in its vocabulary.
+                stop=STOP_SEQUENCES,
                 stream=True,
             )
+            splitter = ThinkingSplitter()
             for chunk in stream:
                 piece = chunk["choices"][0].get("text", "")
-                if piece:
-                    yield piece
+                if not piece:
+                    continue
+                for channel, text in splitter.feed(piece):
+                    if text:
+                        yield channel, text
+            for channel, text in splitter.flush():
+                if text:
+                    yield channel, text
+            # Reasoning shares the max_tokens budget with the answer. On a hard
+            # question it can consume all of it, which would otherwise surface
+            # as an empty reply with no explanation.
+            if splitter.in_thought:
+                yield "truncated", ("Reasoning used the entire token budget before "
+                                    "an answer was produced. Raise max_tokens, or "
+                                    "turn reasoning off for this question.")
         except EngineError:
             raise
         except Exception as e:
@@ -858,9 +1046,11 @@ def generate_tokens(messages, preset, sampling, max_tokens):
 # so CLI entry points and the server agree without extra wiring.
 restore_saved_model_dir()
 read_model_architecture(current_model_path)
+detect_thinking_support()
 
 
-def generate_text(messages, preset_id=None, max_tokens=8192, on_chunk=None):
+def generate_text(messages, preset_id=None, max_tokens=8192, on_chunk=None,
+                  on_thinking=None, enable_thinking=None):
     """Blocking generation helper for the CLI.
 
     `messages` is a full OpenAI-style history. `on_chunk` receives each piece as it
@@ -869,7 +1059,14 @@ def generate_text(messages, preset_id=None, max_tokens=8192, on_chunk=None):
     preset = PRESETS.get(preset_id or "default", PRESETS["default"])
     sampling = {"temperature": preset["temperature"], "top_p": preset["top_p"]}
     parts = []
-    for piece in generate_tokens(messages, preset, sampling, max_tokens):
+    for channel, piece in generate_tokens(messages, preset, sampling, max_tokens,
+                                          enable_thinking=enable_thinking):
+        if channel == "thinking":
+            if on_thinking:
+                on_thinking(piece)
+            continue
+        if channel == "truncated":
+            piece = f"\n\n\u26a0\ufe0f {piece}"
         parts.append(piece)
         if on_chunk:
             on_chunk(piece)
@@ -1247,6 +1444,8 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         # Set custom system model path endpoint
         if path.endswith("/set_model_path") or path.endswith("/system/set_model_path"):
             ok, msg, resolved = apply_model_dir(payload.get("path", ""))
+            if ok:
+                detect_thinking_support()
             if not ok:
                 return self._send_json({"error": "Invalid Model Path", "message": msg}, status=400)
             save_active_config()
@@ -1272,6 +1471,20 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                         warnings.append("ram_ceiling_gb must be between 0.5 and 128.0 GB")
                 except (TypeError, ValueError):
                     warnings.append("ram_ceiling_gb must be a number")
+
+            if any(k in payload for k in ("thinking", "enable_thinking")):
+                global THINKING_ENABLED
+                raw = payload.get("thinking", payload.get("enable_thinking"))
+                new_value = _as_bool(raw, THINKING_ENABLED)
+                if not THINKING_SUPPORTED and new_value:
+                    warnings.append(
+                        "The active model's chat template has no thinking channel; "
+                        "enabling reasoning would have no effect.")
+                elif new_value != THINKING_ENABLED:
+                    THINKING_ENABLED = new_value
+                    updated = True
+                    msg_parts.append(
+                        f"Reasoning {'enabled' if new_value else 'disabled'}")
 
             if "n_ctx" in payload:
                 effective, was_clamped = clamp_context(payload["n_ctx"])
@@ -1420,14 +1633,32 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             "top_p": _as_float(payload.get("top_p"), preset["top_p"]),
         }
 
+        # Per-request override of the server default. `thinking` is the plain
+        # name; `enable_thinking` matches the chat template's own variable and
+        # `reasoning` matches what some OpenAI-compatible clients send.
+        want_thinking = THINKING_ENABLED
+        for key in ("thinking", "enable_thinking", "reasoning"):
+            if key in payload:
+                want_thinking = _as_bool(payload[key], THINKING_ENABLED)
+                break
+
         response_id = f"gen-{int(time.time() * 1000)}"
 
         if stream_mode:
-            return self._stream_completion(response_id, messages, preset, sampling, max_tokens)
+            return self._stream_completion(response_id, messages, preset, sampling,
+                                           max_tokens, enable_thinking=want_thinking)
 
         started = time.perf_counter()
         try:
-            text = "".join(generate_tokens(messages, preset, sampling, max_tokens))
+            reasoning_parts, answer_parts = [], []
+            for channel, piece in generate_tokens(messages, preset, sampling,
+                                                  max_tokens, enable_thinking=want_thinking):
+                if channel == "truncated":
+                    answer_parts.append(f"\n\n\u26a0\ufe0f {piece}")
+                    continue
+                (reasoning_parts if channel == "thinking" else answer_parts).append(piece)
+            text = "".join(answer_parts)
+            reasoning = "".join(reasoning_parts).strip() or None
         except EngineError as e:
             return self._send_json({"error": "Engine Error", "message": str(e)}, status=503)
         elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
@@ -1437,7 +1668,8 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         if path.endswith("/responses"):
             return self._send_json({
                 "id": response_id, "object": "response", "model": MODEL_ID,
-                "response": text, "created": int(time.time()),
+                "response": text, "reasoning_content": reasoning,
+                "created": int(time.time()),
                 "preset": preset["id"], "kv_slots": n_ctx, "timings": timings,
             })
 
@@ -1451,12 +1683,14 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             "timings": timings,
             "choices": [{
                 "index": 0,
-                "message": {"role": "assistant", "content": text},
+                "message": {"role": "assistant", "content": text,
+                            "reasoning_content": reasoning},
                 "finish_reason": "stop",
             }],
         })
 
-    def _stream_completion(self, response_id, messages, preset, sampling, max_tokens):
+    def _stream_completion(self, response_id, messages, preset, sampling, max_tokens,
+                           enable_thinking=None):
         """Emit SSE deltas as llama.cpp produces them.
 
         Headers go out before generation starts, so the client sees the connection
@@ -1495,11 +1729,32 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
 
         started = time.perf_counter()
         token_count = 0
+        reasoning_count = 0
         first_token_ms = None
+        first_answer_ms = None
+        truncated_note = None
         try:
-            for piece in generate_tokens(messages, preset, sampling, max_tokens):
+            for channel, piece in generate_tokens(messages, preset, sampling,
+                                                  max_tokens,
+                                                  enable_thinking=enable_thinking):
+                # Time to first token is when the user first sees output, which
+                # is the first reasoning token when thinking is on. Counting
+                # only answer tokens made a 19s reasoning pass read as
+                # "0.22 tok/s with an 18s first token".
                 if first_token_ms is None:
                     first_token_ms = round((time.perf_counter() - started) * 1000, 2)
+                if channel == "truncated":
+                    truncated_note = piece
+                    continue
+                if channel == "thinking":
+                    # Reasoning rides its own delta field, so a client that does
+                    # not know about it simply renders nothing extra rather than
+                    # mixing the thought process into the answer.
+                    reasoning_count += 1
+                    emit(envelope({"reasoning_content": piece}))
+                    continue
+                if first_answer_ms is None:
+                    first_answer_ms = round((time.perf_counter() - started) * 1000, 2)
                 token_count += 1
                 emit(envelope({"content": piece}))
         except EngineError as e:
@@ -1518,16 +1773,25 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
             return
 
         elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+        total_tokens = token_count + reasoning_count
         timings = {
             "wall_time_ms": elapsed_ms,
             "first_token_ms": first_token_ms,
+            "first_answer_ms": first_answer_ms,
             "completion_tokens": token_count,
+            "reasoning_tokens": reasoning_count,
+            # Throughput covers everything the model produced; reporting only
+            # answer tokens understates it whenever reasoning is on.
             "tokens_per_second": (
-                round(token_count / (elapsed_ms / 1000.0), 2) if elapsed_ms > 0 else None),
+                round(total_tokens / (elapsed_ms / 1000.0), 2) if elapsed_ms > 0 else None),
         }
         record_timings(**timings)
         try:
-            emit(envelope({}, finish_reason="stop", extra={"timings": timings}))
+            emit(envelope(
+                {"content": f"\n\n\u26a0\ufe0f {truncated_note}"} if truncated_note else {},
+                finish_reason="length" if truncated_note else "stop",
+                extra={"timings": timings,
+                       "reasoning_truncated": bool(truncated_note)}))
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
@@ -1540,7 +1804,9 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         messages = prompt if isinstance(prompt, list) else [{"role": "user", "content": str(prompt)}]
         sampling = {"temperature": preset["temperature"], "top_p": preset["top_p"]}
         try:
-            return "".join(generate_tokens(messages, preset, sampling, max_tokens))
+            return "".join(text for channel, text
+                           in generate_tokens(messages, preset, sampling, max_tokens)
+                           if channel in ("content", "truncated"))
         except EngineError as e:
             return f"[VaporRAM Error] {e}"
 

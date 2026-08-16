@@ -130,9 +130,17 @@ def main():
     run_parser = subparsers.add_parser("run", help="One-shot prompt generation")
     run_parser.add_argument("prompt", nargs="+", help="Prompt text")
     run_parser.add_argument("--preset", default=None, help="Preset name (e.g. coder, reasoner, concise)")
+    run_parser.add_argument("--think", dest="think", action="store_true", default=None,
+                            help="Show the model's reasoning (default: on when supported)")
+    run_parser.add_argument("--no-think", dest="think", action="store_false",
+                            help="Skip reasoning and answer directly")
 
     chat_parser = subparsers.add_parser("chat", help="Interactive terminal chat session")
     chat_parser.add_argument("--preset", default=None, help="Preset name (e.g. coder, reasoner, concise)")
+    chat_parser.add_argument("--think", dest="think", action="store_true", default=None,
+                            help="Show the model's reasoning (default: on when supported)")
+    chat_parser.add_argument("--no-think", dest="think", action="store_false",
+                            help="Skip reasoning and answer directly")
 
     serve_parser = subparsers.add_parser("serve", help="Host LAN HTTP API server")
     serve_parser.add_argument("--host", default="0.0.0.0", help="Host address (default: 0.0.0.0)")
@@ -143,6 +151,10 @@ def main():
                               help="Issue a fresh API key, revoking the previous one")
     serve_parser.add_argument("--no-auth", action="store_true",
                               help="Serve without an API key (anyone who can reach the port can use the model)")
+    serve_parser.add_argument("--think", dest="think", action="store_true", default=None,
+                            help="Enable model reasoning (default: on when the model supports it)")
+    serve_parser.add_argument("--no-think", dest="think", action="store_false",
+                            help="Disable model reasoning")
     serve_parser.add_argument("--no-preload", action="store_true",
                               help="Load the weights on the first message instead of at startup")
 
@@ -157,6 +169,10 @@ def main():
     web_parser.add_argument("--api-key", default=None, help="API key to require when sharing")
     web_parser.add_argument("--no-auth", action="store_true",
                             help="Skip API key authentication even when sharing")
+    web_parser.add_argument("--think", dest="think", action="store_true", default=None,
+                            help="Enable model reasoning (default: on when the model supports it)")
+    web_parser.add_argument("--no-think", dest="think", action="store_false",
+                            help="Disable model reasoning")
     web_parser.add_argument("--no-preload", action="store_true",
                             help="Load the weights on the first message instead of at startup")
 
@@ -247,12 +263,36 @@ def main():
         if preset_id not in openai_server.PRESETS:
             print(f"\033[1;33m[Warning]\033[0m Unknown preset '{preset_id}'; using default.")
             preset_id = "default"
+        want_think = args.think
+        if want_think is None:
+            want_think = openai_server.THINKING_ENABLED
+        want_think = want_think and openai_server.detect_thinking_support()
+
+        state = {"in_think": False}
+
+        def show_thinking(piece):
+            # Reasoning is dimmed so it reads as working-out rather than answer.
+            if not state["in_think"]:
+                sys.stdout.write("\033[90m\u2500\u2500 thinking \u2500\u2500\n")
+                state["in_think"] = True
+            sys.stdout.write(piece)
+            sys.stdout.flush()
+
+        def show_answer(piece):
+            if state["in_think"]:
+                sys.stdout.write("\033[0m\n\033[90m\u2500\u2500 answer \u2500\u2500\033[0m\n")
+                state["in_think"] = False
+            sys.stdout.write(piece)
+            sys.stdout.flush()
+
         print(f"\033[1;36m[VaporRAM Output]\033[0m")
         try:
             openai_server.generate_text(
                 [{"role": "user", "content": prompt_str}],
                 preset_id=preset_id,
-                on_chunk=lambda piece: (sys.stdout.write(piece), sys.stdout.flush()),
+                enable_thinking=want_think,
+                on_chunk=show_answer,
+                on_thinking=show_thinking if want_think else None,
             )
             print("\n")
         except openai_server.EngineError as e:
@@ -271,7 +311,12 @@ def main():
         print(f" Model   : \033[1;33m{openai_server.MODEL_ID}\033[0m")
         print(f" Preset  : \033[1;35m{preset['name']}\033[0m (temp={preset['temperature']}, top_p={preset['top_p']})")
         print(f" Context : \033[1;32m{openai_server.n_ctx} tokens\033[0m")
-        print(" Commands: \033[1;30m/stats, /presets, /clear, /reset, /exit\033[0m\n")
+        think_state = {"on": args.think if args.think is not None
+                       else openai_server.THINKING_ENABLED}
+        think_state["on"] = think_state["on"] and openai_server.detect_thinking_support()
+        print(f" Thinking: \033[1;35m{'on' if think_state['on'] else 'off'}\033[0m"
+              f" \033[1;30m(/think to toggle)\033[0m")
+        print(" Commands: \033[1;30m/stats, /presets, /think, /clear, /reset, /exit\033[0m\n")
 
         # Conversation history is kept and replayed, so follow-up questions have context.
         history = []
@@ -299,19 +344,45 @@ def main():
                 elif cmd.lower() == "/clear":
                     os.system("cls" if os.name == "nt" else "clear")
                     continue
+                elif cmd.lower() in ("/think", "/thinking"):
+                    if not openai_server.detect_thinking_support():
+                        print(" This model has no thinking channel; leaving it off.\n")
+                        continue
+                    think_state["on"] = not think_state["on"]
+                    print(f" Thinking {'on' if think_state['on'] else 'off'}.\n")
+                    continue
                 elif cmd.lower() == "/reset":
                     history = []
                     print(" Conversation history cleared.\n")
                     continue
 
                 history.append({"role": "user", "content": cmd})
-                sys.stdout.write("\033[1;36mVaporRAM >\033[0m ")
-                sys.stdout.flush()
+                turn = {"in_think": False}
+
+                def on_think(piece):
+                    if not turn["in_think"]:
+                        sys.stdout.write("\033[90m\u2500\u2500 thinking \u2500\u2500\n")
+                        turn["in_think"] = True
+                    sys.stdout.write(piece)
+                    sys.stdout.flush()
+
+                def on_answer(piece):
+                    if turn["in_think"]:
+                        sys.stdout.write("\033[0m\n\033[1;36mVaporRAM >\033[0m ")
+                        turn["in_think"] = False
+                    sys.stdout.write(piece)
+                    sys.stdout.flush()
+
+                if not think_state["on"]:
+                    sys.stdout.write("\033[1;36mVaporRAM >\033[0m ")
+                    sys.stdout.flush()
                 try:
                     reply = openai_server.generate_text(
                         history,
                         preset_id=preset_id,
-                        on_chunk=lambda piece: (sys.stdout.write(piece), sys.stdout.flush()),
+                        enable_thinking=think_state["on"],
+                        on_chunk=on_answer,
+                        on_thinking=on_think if think_state["on"] else None,
                     )
                     history.append({"role": "assistant", "content": reply})
                     print("\n")
@@ -330,6 +401,8 @@ def main():
         # Before anything spawns a thread: a thread that does not block SIGINT
         # can absorb the CTRL+C that sigwait() is waiting for.
         openai_server.block_shutdown_signals()
+        if args.think is not None:
+            openai_server.THINKING_ENABLED = args.think
         if args.new_key:
             openai_server.rotate_api_key()
         openai_server.serve(host=args.host, port=args.port, api_key=args.api_key,
@@ -342,6 +415,8 @@ def main():
         # Must precede the browser-opening thread below, so that thread
         # inherits the block and cannot swallow CTRL+C.
         openai_server.block_shutdown_signals()
+        if args.think is not None:
+            openai_server.THINKING_ENABLED = args.think
         host = "0.0.0.0" if args.share else args.host
         share = openai_server.configure_sharing(
             host, args.port, api_key=args.api_key,
