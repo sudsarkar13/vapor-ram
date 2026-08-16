@@ -6,6 +6,103 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 
 
+## [v1.0.8-alpha.1] - 2026-08-17
+
+First alpha of the 1.0.8 line. **The model can see.** Image input works end to
+end — API, CLI and dashboard — against `google/gemma-4-E4B-it`'s real vision
+tower.
+
+This is an alpha because the feature is new and wants testing on hardware that
+is not mine, not because anything here is known to be broken.
+
+### 🚀 Highlights & Features
+
+- **Image input, verified working.** Three generated test images, none of whose
+  content appears in the prompt:
+
+  | Image | Model's answer |
+  | :--- | :--- |
+  | Red disc on white | "The image contains a red circle." |
+  | Blue square | "The shape is a square and the color is blue." |
+  | Green triangle | "The shape is a triangle and the color is green." |
+
+  Three for three, shape and colour both correct.
+
+- **Attach images in the dashboard.** A button beside the composer, multi-select
+  with removable thumbnail previews, and paste-a-screenshot straight into the
+  input. An image on its own is a valid message; sent images stay visible in the
+  transcript.
+
+- **`vapor download --mmproj`** fetches the multimodal projector
+  (`mmproj-F16.gguf`, 990,372,672 bytes) — the vision and audio towers, which
+  the base GGUF does not contain. `--mmproj-only` fetches it alone when the
+  weights are already present. `VAPOR_MMPROJ` overrides its location.
+
+- **OpenAI content parts are accepted** on `/v1/chat/completions`, streaming and
+  not. Media parts map onto the model's own control tokens — `<|image|>` 258880,
+  `<|audio|>` 258881, `<|video|>` 258884 — each verified against the vocabulary
+  rather than assumed. This is the same mapping the model's chat template
+  performs.
+
+- **`/health` reports the capability**: `{multimodal: {ready, projector,
+  accepts}}`, so a client can ask before uploading a large image.
+
+- **`--no-mmproj`** on `serve` and `web` leaves an installed projector unused.
+
+### 📊 Measured
+
+Measured on an AMD Ryzen 7 5700U (8 cores / 16 threads, 15 GB, NVMe), `n_ctx`
+16384, A/B under identical conditions with one variable:
+
+| | |
+| :--- | ---: |
+| RSS with the projector enabled | 6.06 GB |
+| RSS with `--no-mmproj` | 5.61 GB |
+| **Cost of enabling vision** | **0.44 GB** |
+
+Processing an actual image did not raise RSS further beyond that. Note the
+projector is memory-mapped like the weights, so it costs far less resident than
+its 0.99 GB on disk.
+
+### 🐛 Fixed Bugs & Issues
+
+- **A multimodal request used to produce confident nonsense.** `build_prompt`
+  coerced `content` with `str()`, so an OpenAI content-part array reached the
+  model as a Python dict repr with the base64 payload inline. It did not error;
+  it answered about nothing.
+- **The capability report ignored `--no-mmproj`.** `multimodal_ready()` checked
+  the projector file and the runtime but not the opt-out flag, so a server told
+  to ignore its projector still advertised `ready: true`. The dashboard enabled
+  its attach button and the request then failed mid-generation. It now reports
+  `ready: false` and refuses up front with a 400 that names the fix.
+- **A projector could have been loaded as the model.** It is also a `.gguf` of
+  comparable size living beside the weights, and every "find a .gguf" scan took
+  the first match — `find_gguf` worked only because `g` sorts before `m`.
+  `paths.is_mmproj` / `find_model_gguf` / `find_mmproj` are now the single rule,
+  used by the server, `bench`, `inspect` and the resource planner.
+- **The context-retry fallback dropped the chat handler**, which would have left
+  multimodal silently disabled on any machine that had to reduce `n_ctx` to
+  load, with `/health` still reporting it ready.
+
+### ⚠️ Known limitations
+
+- **Audio and video are not wired up**, though the projector carries the audio
+  tower and the tokens and template are in place. Audio additionally needs input
+  decoding and resampling. Sending either is refused rather than mishandled.
+- Images are capped at **8 MB** and travel inline as data URLs, so they cost
+  context as well as bandwidth.
+- The projector is an extra **990 MB download**, and is not fetched by a plain
+  `vapor download`.
+
+### ✅ Testing
+
+**207 checks pass**, up from 164 at v1.0.7. The new groups cover content-part
+rendering, the control tokens, projector discovery, the capability gate and its
+opt-out, and assert the installed projector really does carry vision and audio
+tensors.
+
+---
+
 ## [v1.0.7] - 2026-08-16
 
 First stable release of the 1.0.7 line. The theme is **removing every claim the

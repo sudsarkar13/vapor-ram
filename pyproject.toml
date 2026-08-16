@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vapor-ram"
-version = "1.0.7"
+version = "1.0.8-alpha.1"
 description = "Local LLM inference server, CLI and dashboard for google/gemma-4-E4B-it"
 readme = "README.md"
 requires-python = ">=3.9"

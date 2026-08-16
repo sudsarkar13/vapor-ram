@@ -1,143 +1,108 @@
-# v1.0.7 — Stable Release
+# v1.0.8-alpha.1 — Alpha Release
 
-## 🔄 What's Changed (v1.0.7-beta.3 ➔ v1.0.7)
+## 🔄 What's Changed (v1.0.7 ➔ v1.0.8-alpha.1)
 
-This is the first stable release of the 1.0.7 line. Going stable meant auditing
-what the project claims about itself, and the audit found claims the software
-could not back. This release removes them.
+**The model can see.** Image input works end to end — API, CLI and dashboard.
 
-### The benchmark was reporting a pass it had not earned
+This is an alpha because the feature is new and wants testing on hardware that
+is not mine, not because anything here is known to be broken. Everything below
+was verified against the real model.
 
-`vapor bench` invoked the C engine with `c/vapor_engine.o` — an object file —
-as stand-in weights. The call failed every time. The tool then measured the
-peak RSS of the process that had just failed to start, compared it to the
-1.5 GB ceiling, and printed:
+## 👁️ Image input
 
-```
- Execution Status : FAIL
- RAM Status       : PASS (< 1.5 GB)
-```
+`google/gemma-4-E4B-it` is multimodal upstream, but the GGUF everyone downloads
+is a text-only conversion — of its 720 tensors, none are vision or audio. The
+missing piece is a **projector** file, and it turns out to have been sitting in
+the same repository as the weights all along.
 
-So the project's own advertised benchmark reported its headline RAM ceiling as
-met, on the strength of a process that never loaded the model.
-
-It now streams the model's real 42 block ranges through `O_DIRECT` and reports
-what it measured:
-
-```
- Throughput            : 974.7 MB/s
- Per block             : 60.0 ms mean (52.3–85.5 ms)
- Streaming all 42 blocks per token would cost
- 2.54 s/token (0.39 tok/s) on this disk.
+```bash
+vapor download --mmproj      # 990 MB: the vision and audio towers
+vapor web                    # attach button appears in the composer
 ```
 
-It no longer grades itself against the ceiling at all.
+Verified with three generated images, none of whose content appears in the
+prompt:
 
-### The SIMD benchmark reported ~200,000 GFLOPS
+| Image | Model's answer |
+| :--- | :--- |
+| Red disc on white | *"The image contains a red circle."* |
+| Blue square | *"The shape is a square and the color is blue."* |
+| Green triangle | *"The shape is a triangle and the color is green."* |
 
-About a thousand times what this class of CPU can produce. The results were
-unused, so `-O3` deleted both timing loops outright; the "scalar" baseline was
-auto-vectorised into the very instructions it was meant to be compared against;
-and the pure function was hoisted out of the loop entirely. With a compiler
-barrier, a genuinely scalar baseline and enough iterations to measure, it now
-reports figures that are stable to three runs:
+Three for three, shape and colour both correct.
+
+### In the dashboard
+
+An attach button beside the composer — multi-select, removable thumbnail
+previews, and **pasting a screenshot straight into the input works**. An image
+on its own is a valid message, and sent images stay visible in the transcript.
+
+### Over the API
+
+Standard OpenAI content parts, streaming and not:
+
+```json
+{"messages": [{"role": "user", "content": [
+  {"type": "text", "text": "What is in this image?"},
+  {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+]}]}
+```
+
+Ask before uploading — `/health` reports what the server can actually accept:
+
+```json
+{"multimodal": {"ready": true, "projector": "mmproj-F16.gguf",
+                "accepts": ["image", "audio", "video"]}}
+```
+
+## 📊 What it costs
+
+Measured A/B on an AMD Ryzen 7 5700U (8c/16t, 15 GB, NVMe) at `n_ctx` 16384,
+identical conditions with one variable:
 
 | | |
 | :--- | ---: |
-| Scalar | 2.76 GFLOPS |
-| AVX2 + FMA | 14.13 GFLOPS |
-| Speedup | **5.12x** |
+| RSS with the projector enabled | 6.06 GB |
+| RSS with `--no-mmproj` | 5.61 GB |
+| **Cost of enabling vision** | **0.44 GB** |
 
-It also called its vector dimension "Gemma hidden size" while using 3072 — this
-model's is 2560 — and printed `OpenMP Threads : 16` while running
-single-threaded. There is no `#pragma omp` anywhere in the C sources.
-
-### Three more commands were grading themselves
-
-`vapor bench` was not the only one. Two other user-facing commands printed
-verdicts they had not established, and a third printed numbers it had not read.
-
-- **`vapor plan`** reported `Plan Status : PASS` against the 1.5 GB ceiling
-  from an estimate built entirely of hard-coded constants — a 140 MB layer size
-  (real blocks average 61.7 MB), 32 layers (there are 42), 16 heads (there are
-  8). Measured RSS at the time was over 7 GB. It now sizes the design from the
-  file's real geometry and reports the running server's actual RSS.
-- **`vapor inspect`** read only `config.json`, whose architecture keys are
-  nested under `text_config` for this model. Every lookup missed, so its
-  fallbacks were printed as the model's own: hidden size 3072 (really 2560),
-  32 layers (42), 16 heads (8), vocab 256000 (262144). It ignored the GGUF
-  sitting next to it and signed off with an unconditional readiness pass. It
-  now reads the tensor directory and verifies it accounts for the file exactly.
-- **`vapor doctor`** passed any machine with 1.5 GB free — the ceiling
-  *target*, not the ~7.5 GB the engine actually needs — so a host that could
-  never load the model was told it was ready.
-
-And `tools/convert_gemma_safetensors.py`, a "weight converter", opened no
-tensor at all: it wrote 4.4 GB of zeros and printed `[Success]`. Removed.
-
-### Everything in the README is now measured
-
-| | |
-| :--- | ---: |
-| Peak RSS, `n_ctx` 8192 | 7.27 GB |
-| Peak RSS, `n_ctx` 16384 | 8.72 GB |
-| Cost of doubling context | 1.45 GB |
-| Throughput | 4.0–5.3 tok/s |
-| Server start → ready | 9.5 s |
-| `O_DIRECT` streaming | 974.7 MB/s |
-
-Measured on an AMD Ryzen 7 5700U (8 cores / 16 threads, 15 GB RAM, NVMe) with
-`gemma-4-E4B-it-Q4_K_M.gguf`. Reproduce them with `vapor bench`.
-
-The README now opens with a table of what is true — including the plain
-statement that **the 1.5 GB RAM ceiling is not met**, that llama.cpp
-memory-maps the whole GGUF, that the C engine is a measurement tool rather than
-an inference engine, and what reaching the ceiling would actually cost. The
-ceiling stays as what it is: a research goal the project has now costed.
-
-### Other claims corrected
-
-- `/health` described the weights as `GGUF / Int4 SSD Stream`. They are a mixed
-  K-quant (Q4_K/Q5_K/Q6_K, plus F32 and BF16), memory-mapped. The field is now
-  read from the GGUF tensor directory.
-- The package described itself as an "Ultra-Low RAM SSD Streaming Engine" on
-  PyPI, in the CLI banner, in the dashboard and in the page title.
-- The docs site claimed 32 transformer layers (there are 42), an "8B" model
-  (7.52 B parameters), an int8 KV cache holding context under 250 MB, and a
-  fabricated "RAM Budget Usage 9.5%" — while sitting on `v1.0.7-alpha.3` for
-  eight releases because its sync job's regexes matched nothing.
-- `quant_type: "int8_kv_int4_weights"` sat in the default config describing a
-  scheme the project does not use. Nothing read it.
+Processing an actual image did not raise it further. The projector is
+memory-mapped like the weights, so it costs far less resident than its 990 MB on
+disk. `--no-mmproj` on `serve` and `web` gets that back.
 
 ## 🐛 Fixed
 
-- **The OpenAI API returned no `usage` block.** `completion_tokens` was
-  hard-coded to `None`, so SDK clients saw zero tokens for every non-streaming
-  call. Both paths now report real counts, taken from the tokenizer rather than
-  inferred from yielded text pieces.
-- **The config wizard wrote the API key to `vapor.json`**, which the server
-  never reads — it loads keys only from `~/.vapor-ram/api_key`. A key entered
-  there silently did nothing while reporting success. It also overwrote the
-  config wholesale, discarding `n_ctx`, `enable_thinking` and
-  `reasoning_effort`. Both fixed.
-- **`vapor init-config` wrote to the current directory**, not where the server
-  reads.
-- **`vapor.json` was tracked in git** while the server writes to it, so a
-  checkout could reset your settings. Now untracked, with
-  `vapor.example.json` as the tracked reference and `VAPOR_CONFIG_PATH` to
-  override the location.
-- **`c/vapor_engine` and `c/simd_bench` were tracked binaries**, pushing one
-  host's architecture at every other host. Both untracked; they are built at
-  install time.
+- **A multimodal request used to produce confident nonsense.** `build_prompt`
+  coerced `content` with `str()`, so a content-part array reached the model as a
+  Python dict repr with the base64 inline. It did not error — it answered about
+  nothing.
+- **The capability report ignored `--no-mmproj`**, so a server told to ignore
+  its projector still advertised `ready: true`. The dashboard enabled its attach
+  button and the request failed mid-generation. Caught while testing the gate.
+- **A projector could have been loaded as the model** — it is also a `.gguf` of
+  comparable size sitting beside the weights, and `find_gguf` took the first
+  match, working only because `g` sorts before `m`.
+- **The context-retry fallback dropped the chat handler**, which would have
+  disabled multimodal silently on any machine that had to reduce `n_ctx`.
+
+## ⚠️ Known limitations
+
+- **Audio and video are not wired up.** The projector carries the audio tower
+  and the tokens and template are in place, but audio needs input decoding and
+  resampling first. Sending either is refused rather than mishandled.
+- Images are capped at **8 MB** and travel inline as data URLs, so they cost
+  context as well as bandwidth.
+- The projector is a separate **990 MB** download.
 
 ## ✅ Testing
 
-**164 checks pass**, up from 139. The new group guards each corrected claim, so
-the benchmark can never again print a pass against the RAM ceiling without a
-test failing.
+**207 checks pass**, up from 164 at v1.0.7.
 
 ## 📦 Install
 
 ```bash
-pip install vapor-ram==1.0.7
+pip install vapor-ram==1.0.8a1
+vapor download --mmproj
 ```
+
+Stable users are unaffected — `pip install vapor-ram` still resolves to v1.0.7.

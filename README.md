@@ -29,6 +29,7 @@ yourself with `vapor bench`, `vapor doctor` and the dashboard's Profiling tab.
 | Throughput | **4.0–5.3 tok/s** on the reference machine, reasoning on or off. |
 | The C engine | A **measurement tool**. It streams real byte ranges and reports timings. It does not generate tokens. |
 | SIMD kernels | A **standalone microbenchmark** (`vapor bench --simd`). Not on the token path — llama.cpp does the arithmetic. |
+| Image input | **Works**, with the projector installed. Verified against the real model, not asserted. Audio and video are not wired up yet. |
 | KV cache | llama.cpp's own **f16** cache. The int8 code in `c/kv_cache.c` is not on the token path. |
 
 If streaming ever did serve generation, this is what it would cost — also
@@ -44,6 +45,7 @@ measured, on this machine's NVMe:
 ---
 ## Key Features
 
+- **Image input** — the model can see. Attach images in the dashboard (or paste a screenshot), or send OpenAI content parts over the API. Needs the multimodal projector, a separate ~990 MB download.
 - **OpenAI-compatible API** — `/v1/chat/completions` (streaming and not), `/v1/responses`, `/v1/models`, `/health`. Point any OpenAI SDK at it by changing `base_url`. Responses carry a real `usage` block.
 - **Reasoning you can read** — `gemma-4-E4B-it` reasons natively. The dashboard shows the thought process as it streams, in a block you can expand and read, with four effort levels.
 - **Network sharing behind an API key** — one command exposes the model to your LAN; the key is generated on first use and stored outside the repo at `~/.vapor-ram/api_key` (mode `0600`).
@@ -63,7 +65,7 @@ the real requirements for running it as it currently works:
 | Resource | Minimum | Recommended |
 | :--- | :--- | :--- |
 | **RAM** | **8 GB** — measured peak RSS is 7.27 GB at `n_ctx` 8192 | **16 GB**, and more if you want `n_ctx` 16384 alongside a browser |
-| **Storage** | **6 GB** for the Q4_K_M weights (4.98 GB) plus room to download | NVMe SSD |
+| **Storage** | **6 GB** for the Q4_K_M weights (4.98 GB), plus ~1 GB more for the image projector | NVMe SSD |
 | **CPU** | x86_64 with AVX2, or Apple Silicon | 8+ physical cores |
 | **OS** | Linux (x86_64, WSL2), macOS (Apple Silicon or Intel) | — |
 | **Python** | 3.9+ | 3.12 |
@@ -294,6 +296,52 @@ that and says so rather than returning an empty reply. And the model decides
 whether a question warrants reasoning: simple prompts are answered directly.
 
 ---
+### Images
+
+`gemma-4-E4B-it` is multimodal, but the GGUF is a text-only conversion — none of
+its 720 tensors are vision or audio. The vision and audio towers live in a
+separate **projector** file:
+
+```bash
+vapor download --mmproj        # ~990 MB, fetched separately from the weights
+```
+
+With it installed, the dashboard grows an attach button beside the composer:
+multi-select, removable previews, and pasting a screenshot straight into the
+input. An image on its own is a valid message.
+
+Over the API, send standard OpenAI content parts:
+
+```json
+{"messages": [{"role": "user", "content": [
+  {"type": "text", "text": "What is in this image?"},
+  {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+]}]}
+```
+
+Ask what the server can accept before uploading anything large:
+
+```bash
+curl -s localhost:8000/health | jq .multimodal
+# {"ready": true, "projector": "mmproj-F16.gguf",
+#  "accepts": ["image", "audio", "video"]}
+```
+
+Sending media to a server without the projector is **refused with a 400**, not
+answered — the model would otherwise receive an image token with no image behind
+it and describe something that was never there.
+
+Measured cost of enabling it on the reference machine: **0.44 GB** of RSS
+(6.06 GB with, 5.61 GB with `--no-mmproj`, A/B under identical conditions).
+Processing an image did not raise it further. `--no-mmproj` on `serve` and `web`
+leaves an installed projector unused; `VAPOR_MMPROJ` overrides its location.
+
+> **Audio and video are not wired up yet.** The projector carries the audio
+> tower and the control tokens are in place, but audio needs input decoding and
+> resampling first. Sending either is refused rather than mishandled.
+
+---
+
 ## Weight Layout
 
 The **Brain Cortex** tab reads the GGUF tensor directory directly, so every
