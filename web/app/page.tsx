@@ -104,7 +104,14 @@ export default function VaporDashboardPage() {
 							preset={currentPreset}
 							modelState={health?.model_state ?? progress?.model_state}
 							modelAvailable={health?.model_available ?? true}
-							multimodalReady={health?.multimodal?.ready ?? false}
+							multimodalReady={
+								(health?.multimodal?.ready ?? false) &&
+								(health?.multimodal?.accepts?.includes("image") ?? false)
+							}
+							audioReady={
+								(health?.multimodal?.ready ?? false) &&
+								(health?.multimodal?.accepts?.includes("audio") ?? false)
+							}
 						/>
 					)}
 

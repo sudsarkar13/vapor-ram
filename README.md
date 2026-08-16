@@ -29,7 +29,8 @@ yourself with `vapor bench`, `vapor doctor` and the dashboard's Profiling tab.
 | Throughput | **4.0–5.3 tok/s** on the reference machine, reasoning on or off. |
 | The C engine | A **measurement tool**. It streams real byte ranges and reports timings. It does not generate tokens. |
 | SIMD kernels | A **standalone microbenchmark** (`vapor bench --simd`). Not on the token path — llama.cpp does the arithmetic. |
-| Image input | **Works**, with the projector installed. Verified against the real model, not asserted. Audio and video are not wired up yet. |
+| Image input | **Works**, with the projector installed. Verified against the real model, not asserted. |
+| Audio input | **Speech transcription works.** The encoder is speech-trained: it transcribes accurately and is unreliable on non-speech (tones, noise). Video is not implemented. |
 | KV cache | llama.cpp's own **f16** cache. The int8 code in `c/kv_cache.c` is not on the token path. |
 
 If streaming ever did serve generation, this is what it would cost — also
@@ -45,7 +46,7 @@ measured, on this machine's NVMe:
 ---
 ## Key Features
 
-- **Image input** — the model can see. Attach images in the dashboard (or paste a screenshot), or send OpenAI content parts over the API. Needs the multimodal projector, a separate ~990 MB download.
+- **Image and speech input** — the model can see and hear. Attach images (or paste a screenshot) and speech audio in the dashboard, or send OpenAI content parts over the API. Needs the multimodal projector, a separate ~990 MB download.
 - **OpenAI-compatible API** — `/v1/chat/completions` (streaming and not), `/v1/responses`, `/v1/models`, `/health`. Point any OpenAI SDK at it by changing `base_url`. Responses carry a real `usage` block.
 - **Reasoning you can read** — `gemma-4-E4B-it` reasons natively. The dashboard shows the thought process as it streams, in a block you can expand and read, with four effort levels.
 - **Network sharing behind an API key** — one command exposes the model to your LAN; the key is generated on first use and stored outside the repo at `~/.vapor-ram/api_key` (mode `0600`).
@@ -296,7 +297,7 @@ that and says so rather than returning an empty reply. And the model decides
 whether a question warrants reasoning: simple prompts are answered directly.
 
 ---
-### Images
+### Images and audio
 
 `gemma-4-E4B-it` is multimodal, but the GGUF is a text-only conversion — none of
 its 720 tensors are vision or audio. The vision and audio towers live in a
@@ -306,9 +307,10 @@ separate **projector** file:
 vapor download --mmproj        # ~990 MB, fetched separately from the weights
 ```
 
-With it installed, the dashboard grows an attach button beside the composer:
-multi-select, removable previews, and pasting a screenshot straight into the
-input. An image on its own is a valid message.
+With it installed, the dashboard grows two attach buttons beside the composer —
+one for images, one for audio. Multi-select, removable previews, a player for
+attached clips, and pasting a screenshot straight into the input. Media on its
+own is a valid message, and images and audio can be mixed in one.
 
 Over the API, send standard OpenAI content parts:
 
@@ -319,12 +321,21 @@ Over the API, send standard OpenAI content parts:
 ]}]}
 ```
 
-Ask what the server can accept before uploading anything large:
+Audio uses the standard OpenAI shape (a bare base64 payload with a `format`, or
+a `data:` URL):
+
+```json
+{"type": "input_audio", "input_audio": {"data": "<base64 wav>", "format": "wav"}}
+```
+
+Ask what the server can accept before uploading anything large. The list is read
+from the projector's own tensors, so it describes that file rather than a fixed
+assumption:
 
 ```bash
 curl -s localhost:8000/health | jq .multimodal
 # {"ready": true, "projector": "mmproj-F16.gguf",
-#  "accepts": ["image", "audio", "video"]}
+#  "accepts": ["image", "audio"]}
 ```
 
 Sending media to a server without the projector is **refused with a 400**, not
@@ -336,9 +347,16 @@ Measured cost of enabling it on the reference machine: **0.44 GB** of RSS
 Processing an image did not raise it further. `--no-mmproj` on `serve` and `web`
 leaves an installed projector unused; `VAPOR_MMPROJ` overrides its location.
 
-> **Audio and video are not wired up yet.** The projector carries the audio
-> tower and the control tokens are in place, but audio needs input decoding and
-> resampling first. Sending either is refused rather than mishandled.
+**What audio is good for.** The encoder is speech-trained, and it transcribes
+speech accurately — three real clips of known speech came back verbatim. It is
+**not** a general audio-description model: fed a pure tone, silence and white
+noise, it returned the same confabulated description for all three. Use it for
+speech; do not trust it on sound effects or music. Audio is resampled by the
+runtime, but 16 kHz mono WAV is what the projector expects and works best.
+
+> **Video is not implemented.** The chat template maps a video part onto a token
+> and the projector reports no video tower, so a video part is refused with a
+> 400 rather than turned into a marker the model would describe from nothing.
 
 ---
 

@@ -1038,6 +1038,85 @@ def test_multimodal_intake(port):
           "false positive")
 
 
+
+def test_audio_intake(port):
+    """Audio parts, media ordering, and refusing what is not implemented.
+
+    The audio encoder is a speech encoder: it transcribes speech accurately and
+    confabulates on synthetic tones. These checks cover the plumbing, which is
+    what can be asserted deterministically; the transcription itself is verified
+    by hand against real speech and recorded in the changelog.
+    """
+    print("\n[16] Audio intake")
+    from vapor_ram import openai_server as s
+
+    # --- every part shape a client might send resolves to a URL -------------
+    b64 = "UklGRiQAAABXQVZF"
+    shapes = [
+        ({"type": "input_audio", "input_audio": {"data": b64, "format": "wav"}},
+         "OpenAI input_audio with a bare base64 payload"),
+        ({"type": "audio", "audio": {"url": f"data:audio/wav;base64,{b64}"}},
+         "audio part carrying a data URL"),
+        ({"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+         "image part"),
+    ]
+    for part, label in shapes:
+        url = s._part_media_url(part)
+        check(f"{label} resolves to a URL", bool(url), str(part)[:70])
+    bare = s._part_media_url(
+        {"type": "input_audio", "input_audio": {"data": b64, "format": "wav"}})
+    check("a bare base64 payload gains a data: prefix",
+          bare.startswith("data:audio/wav;base64,"), bare[:40])
+    check("non-media parts resolve to nothing",
+          s._part_media_url({"type": "text", "text": "hi"}) is None, "false positive")
+
+    # --- accepted kinds are read from the projector, not hard-coded --------
+    accepts = s.multimodal_accepts()
+    check("video is never advertised", "video" not in accepts, str(accepts))
+    if s.mmproj_path() and s.MMPROJ_ENABLED:
+        check("a projector with a vision tower advertises image",
+              "image" in accepts, str(accepts))
+        check("a projector with an audio tower advertises audio",
+              "audio" in accepts, str(accepts))
+    else:
+        check("no projector means nothing is accepted", accepts == [], str(accepts))
+
+    # --- media order must survive, or bitmaps pair with the wrong marker ---
+    if s.mmproj_path():
+        try:
+            handler_cls = s._multimodal_handler_class()
+        except Exception as e:
+            handler_cls = None
+            check("multimodal handler class is constructible", False, str(e))
+        if handler_cls:
+            urls = handler_cls.get_image_urls([{"role": "user", "content": [
+                {"type": "text", "text": "a"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,IMG1"}},
+                {"type": "input_audio", "input_audio": {"data": "AUD1", "format": "wav"}},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,IMG2"}},
+            ]}])
+            check("media is collected in document order, not grouped by kind",
+                  len(urls) == 3 and "IMG1" in urls[0] and "AUD1" in urls[1]
+                  and "IMG2" in urls[2], str(urls))
+            marker = "<<M>>"
+            converted = handler_cls._convert_content_part_for_template(
+                {"type": "input_audio", "input_audio": {"data": "x", "format": "wav"}}, marker)
+            check("an audio part becomes a template marker",
+                  converted == {"type": "text", "text": marker}, str(converted))
+
+    # --- video is refused rather than turned into a bare marker ------------
+    base = f"http://127.0.0.1:{port}"
+    status, res = post(f"{base}/v1/chat/completions", {"messages": [
+        {"role": "user", "content": [
+            {"type": "text", "text": "what is this"},
+            {"type": "video", "video": {"url": "data:video/mp4;base64,AAAA"}}]}]},
+        timeout=30)
+    check("video input is refused", status == 400, f"got {status}")
+    body = json.dumps(res)
+    check("the refusal says video is not implemented",
+          "video" in body.lower(), body[:140])
+
+
 def main():
     print("=" * 60)
     print("   VaporRAM Integration Test Suite")
@@ -1086,6 +1165,7 @@ def main():
     test_stable_release_honesty(port)
     test_docs_channel_policy()
     test_multimodal_intake(port)
+    test_audio_intake(port)
 
     print("\n" + "=" * 60)
     if FAILED:

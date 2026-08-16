@@ -16,6 +16,7 @@ import {
 	Loader2,
 	AlertTriangle,
 	ImagePlus,
+	Mic,
 	X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ import {
 	ContentPart,
 	messageText,
 	messageImages,
+	messageAudio,
 } from "@/lib/api";
 import {
 	subscribe as subscribeGeneration,
@@ -47,6 +49,8 @@ interface ChatViewProps {
 	modelAvailable?: boolean;
 	/** Undefined while health is still loading. */
 	multimodalReady?: boolean;
+	/** Separate from images: a projector may carry one tower and not the other. */
+	audioReady?: boolean;
 }
 
 // Images are inlined as data URLs in the request body, so a large photo costs
@@ -58,6 +62,9 @@ interface Attachment {
 	id: string;
 	name: string;
 	dataUrl: string;
+	kind: "image" | "audio";
+	/** wav, mp3, … — needed to rebuild the OpenAI input_audio part. */
+	format?: string;
 }
 
 // Three bouncing dots, staggered so they read as a wave.
@@ -88,12 +95,14 @@ export function ChatView({
 	modelState,
 	modelAvailable = true,
 	multimodalReady,
+	audioReady,
 }: ChatViewProps) {
 	const [input, setInput] = useState("");
 	const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 	const [attachments, setAttachments] = useState<Attachment[]>([]);
 	const [attachError, setAttachError] = useState<string | null>(null);
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
+	const audioInputRef = useRef<HTMLInputElement | null>(null);
 
 	// Generation lives outside React, so switching tabs mid-reply no longer
 	// discards the stop button, the abort handle or the timings.
@@ -138,12 +147,16 @@ export function ChatView({
 	const isStreamingAssistant = (idx: number) =>
 		isGenerating && idx === lastAssistantIndex;
 
-	const addFiles = (files: FileList | File[] | null) => {
+	const addFiles = (files: FileList | File[] | null, only?: "image" | "audio") => {
 		if (!files) return;
 		setAttachError(null);
 		for (const file of Array.from(files)) {
-			if (!file.type.startsWith("image/")) {
-				setAttachError(`${file.name} is not an image.`);
+			const kind: "image" | "audio" | null =
+				file.type.startsWith("image/") ? "image"
+				: file.type.startsWith("audio/") ? "audio"
+				: null;
+			if (!kind || (only && kind !== only)) {
+				setAttachError(`${file.name} is not a supported ${only ?? "image or audio"} file.`);
 				continue;
 			}
 			if (file.size > MAX_IMAGE_BYTES) {
@@ -162,6 +175,11 @@ export function ChatView({
 						id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
 						name: file.name,
 						dataUrl,
+						kind,
+						format:
+							kind === "audio"
+								? (file.name.split(".").pop() || "wav").toLowerCase()
+								: undefined,
 					},
 				]);
 			};
@@ -194,10 +212,21 @@ export function ChatView({
 				? query
 				: ([
 						...(query ? [{ type: "text", text: query }] : []),
-						...attachments.map((a) => ({
-							type: "image_url" as const,
-							image_url: { url: a.dataUrl },
-						})),
+						...attachments.map((a) =>
+							a.kind === "audio"
+								? {
+										type: "input_audio" as const,
+										input_audio: {
+											// The server wants the payload alone, not the data: prefix.
+											data: a.dataUrl.split(",")[1] ?? "",
+											format: a.format ?? "wav",
+										},
+									}
+								: {
+										type: "image_url" as const,
+										image_url: { url: a.dataUrl },
+									},
+						),
 					] as ContentPart[]);
 
 		const updatedMessages: VaporMessage[] = [
@@ -331,6 +360,14 @@ export function ChatView({
 												))}
 											</div>
 										)}
+										{messageAudio(msg.content).map((src, i) => (
+											<audio
+												key={i}
+												src={src}
+												controls
+												className="w-56 h-8"
+											/>
+										))}
 										{messageText(msg.content) && (
 											<p className="whitespace-pre-wrap">
 												{messageText(msg.content)}
@@ -415,12 +452,25 @@ export function ChatView({
 								<div
 									key={a.id}
 									className="relative group rounded-lg border border-slate-700 bg-slate-900 overflow-hidden">
-									{/* eslint-disable-next-line @next/next/no-img-element */}
-									<img
-										src={a.dataUrl}
-										alt={a.name}
-										className="h-16 w-16 object-cover"
-									/>
+									{a.kind === "audio" ?
+										<div className="h-16 w-44 flex flex-col justify-center gap-1 px-2">
+											<div className="flex items-center gap-1.5 text-[10px] text-slate-300 truncate">
+												<Mic className="h-3 w-3 shrink-0 text-cyan-400" />
+												<span className="truncate">{a.name}</span>
+											</div>
+											<audio
+												src={a.dataUrl}
+												controls
+												className="w-full h-6"
+											/>
+										</div>
+									:	/* eslint-disable-next-line @next/next/no-img-element */
+										<img
+											src={a.dataUrl}
+											alt={a.name}
+											className="h-16 w-16 object-cover"
+										/>
+									}
 									<button
 										type="button"
 										onClick={() => removeAttachment(a.id)}
@@ -477,6 +527,37 @@ export function ChatView({
 									e.target.value = "";
 								}}
 							/>
+							<input
+								ref={audioInputRef}
+								type="file"
+								accept="audio/*"
+								multiple
+								className="hidden"
+								onChange={(e) => {
+									addFiles(e.target.files, "audio");
+									e.target.value = "";
+								}}
+							/>
+							<Button
+								type="button"
+								size="icon"
+								variant="ghost"
+								disabled={!audioReady || isGenerating}
+								onClick={() => audioInputRef.current?.click()}
+								aria-label={
+									audioReady
+										? "Attach speech audio"
+										: "Audio input needs the multimodal projector"
+								}
+								title={
+									audioReady
+										? "Attach audio — transcribes speech (WAV, 16 kHz mono works best)"
+										: "Install the projector to send audio:  vapor download --mmproj"
+								}
+								className="h-8 w-8 text-slate-400 hover:text-cyan-300 hover:bg-slate-800 disabled:opacity-35">
+								<Mic className="h-4 w-4" />
+							</Button>
+
 							<Button
 								type="button"
 								size="icon"

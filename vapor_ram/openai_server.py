@@ -595,6 +595,34 @@ def mmproj_path():
     return paths.find_mmproj(directory)
 
 
+def multimodal_accepts():
+    """Media kinds this server can actually process, read from the projector.
+
+    Not a fixed list: a projector carries a vision tower, an audio tower, both
+    or neither, and the answer is in its tensor directory. This used to return
+    ["image", "audio", "video"] whenever a projector existed, which advertised
+    two capabilities that were not wired up.
+
+    Video is never included. The chat template maps a video part onto a token,
+    but nothing downstream decodes frames, so accepting one would mean handing
+    the model a marker with no content behind it.
+    """
+    projector = mmproj_path()
+    if not projector or not MMPROJ_ENABLED:
+        return []
+    try:
+        from .gguf import read_gguf
+        names = [t["name"] for t in read_gguf(projector)["tensors"]]
+    except Exception:
+        return []
+    accepts = []
+    if any(n.startswith("v.") for n in names):
+        accepts.append("image")
+    if any(n.startswith(("a.", "mm.a.")) for n in names):
+        accepts.append("audio")
+    return accepts
+
+
 def multimodal_ready():
     """True when media input can actually be processed.
 
@@ -1096,6 +1124,80 @@ def build_prompt(messages, preset, enable_thinking=None, effort=None):
     return prefix + "".join(rendered) + f"{TURN_OPEN}model\n"
 
 
+# Content-part types that carry audio rather than pixels.
+AUDIO_PART_TYPES = ("audio", "input_audio")
+IMAGE_PART_TYPES = ("image", "image_url", "input_image")
+
+
+def _part_media_url(part):
+    """The data: or http: URL inside a media content part, or None.
+
+    Callers send audio in several shapes depending on which client they use:
+    OpenAI's own `input_audio` nests {"data": ..., "format": ...}, while others
+    reuse the image_url shape. All of them end up as bytes either way.
+    """
+    if not isinstance(part, dict):
+        return None
+    ptype = part.get("type")
+    if ptype in IMAGE_PART_TYPES:
+        value = part.get("image_url") or part.get("image")
+        if isinstance(value, dict):
+            return value.get("url")
+        return value if isinstance(value, str) else None
+    if ptype in AUDIO_PART_TYPES:
+        value = part.get("input_audio") or part.get("audio")
+        if isinstance(value, dict):
+            url = value.get("url") or value.get("data")
+            fmt = value.get("format") or "wav"
+            if url and not str(url).startswith(("data:", "http")):
+                # Bare base64 with a separate format field.
+                return f"data:audio/{fmt};base64,{url}"
+            return url
+        return value if isinstance(value, str) else None
+    return None
+
+
+def _multimodal_handler_class():
+    """Gemma4ChatHandler extended to ingest audio as well as images.
+
+    llama.cpp's MTMD runtime handles audio already -- `mtmd_helper_bitmap_init_from_buf`
+    sniffs the buffer and returns an audio bitmap for a WAV, verified against
+    this projector -- but the Python handler only ever collects `image_url`
+    parts, so audio never reached it. These two overrides are the whole gap.
+
+    Media order is load-bearing: the template leaves one marker per media part,
+    and the bitmaps are consumed positionally. Collecting images first and audio
+    second would pair the wrong bitmap with the wrong marker, so both are
+    gathered in document order.
+    """
+    from llama_cpp.llama_chat_format import Gemma4ChatHandler
+
+    class VaporMultimodalHandler(Gemma4ChatHandler):
+        @staticmethod
+        def get_image_urls(messages):
+            urls = []
+            for message in messages:
+                if message.get("role") != "user":
+                    continue
+                content = message.get("content")
+                if not isinstance(content, list):
+                    continue
+                for part in content:
+                    url = _part_media_url(part)
+                    if url:
+                        urls.append(url)
+            return urls
+
+        @staticmethod
+        def _convert_content_part_for_template(part, media_marker):
+            if isinstance(part, dict) and part.get("type") in (
+                    IMAGE_PART_TYPES + AUDIO_PART_TYPES):
+                return {"type": "text", "text": media_marker}
+            return part
+
+    return VaporMultimodalHandler
+
+
 def build_chat_handler():
     """Construct the multimodal chat handler, or None when unavailable.
 
@@ -1110,14 +1212,14 @@ def build_chat_handler():
     if not projector:
         return None
     try:
-        from llama_cpp.llama_chat_format import Gemma4ChatHandler
+        handler_cls = _multimodal_handler_class()
     except Exception as e:
         sys.stderr.write(
             f"\033[33m[Multimodal] llama-cpp-python has no Gemma4 handler ({e}); "
             f"image and audio input disabled.\033[0m\n")
         return None
     try:
-        handler = Gemma4ChatHandler(clip_model_path=projector, verbose=False)
+        handler = handler_cls(clip_model_path=projector, verbose=False)
     except Exception as e:
         sys.stderr.write(
             f"\033[33m[Multimodal] Could not load {os.path.basename(projector)} "
@@ -1535,7 +1637,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 "multimodal": {
                     "ready": multimodal_ready(),
                     "projector": os.path.basename(mmproj_path()) if mmproj_path() else None,
-                    "accepts": ["image", "audio", "video"] if multimodal_ready() else [],
+                    "accepts": multimodal_accepts() if multimodal_ready() else [],
                 },
             }
             # /health stays reachable without a key so a client can confirm it
@@ -1977,9 +2079,9 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         # still carry <|image|>, and the model would answer confidently about an
         # image it was never shown. Refuse, and say how to fix it.
         media = message_media(messages)
+        kinds = sorted({("audio" if "audio" in m else
+                         "video" if "video" in m else "image") for m in media})
         if media and not multimodal_ready():
-            kinds = sorted({("audio" if "audio" in m else
-                             "video" if "video" in m else "image") for m in media})
             return self._send_json({
                 "error": "Multimodal input not available",
                 "message": (
@@ -1988,6 +2090,23 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                     "Install it with: vapor download --mmproj"),
                 "media_types": kinds,
                 "projector_installed": False,
+            }, status=400)
+
+        # A kind the projector does not carry -- or that VaporRAM has not wired
+        # up, which is video -- is refused rather than turned into a bare marker
+        # the model would then describe from nothing.
+        supported = multimodal_accepts()
+        unsupported = [k for k in kinds if k not in supported]
+        if unsupported:
+            return self._send_json({
+                "error": "Unsupported media type",
+                "message": (
+                    f"This request contains {', '.join(unsupported)} input, which this "
+                    f"server cannot process. It accepts: {', '.join(supported) or 'nothing'}."
+                    + (" Video is not implemented." if "video" in unsupported else "")),
+                "media_types": kinds,
+                "unsupported": unsupported,
+                "accepts": supported,
             }, status=400)
 
         response_id = f"gen-{int(time.time() * 1000)}"

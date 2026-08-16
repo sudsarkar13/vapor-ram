@@ -10,7 +10,8 @@
  *  The server maps each media part onto the model's own control token. */
 export type ContentPart =
 	| { type: "text"; text: string }
-	| { type: "image_url"; image_url: { url: string } };
+	| { type: "image_url"; image_url: { url: string } }
+	| { type: "input_audio"; input_audio: { data: string; format: string } };
 
 export interface VaporMessage {
 	role: "system" | "user" | "assistant";
@@ -36,6 +37,15 @@ export function messageImages(content: VaporMessage["content"]): string[] {
 		.filter((p): p is Extract<ContentPart, { type: "image_url" }> =>
 			p.type === "image_url")
 		.map((p) => p.image_url.url);
+}
+
+/** Playable data URLs for every audio clip attached to a message, in order. */
+export function messageAudio(content: VaporMessage["content"]): string[] {
+	if (typeof content === "string") return [];
+	return content
+		.filter((p): p is Extract<ContentPart, { type: "input_audio" }> =>
+			p.type === "input_audio")
+		.map((p) => `data:audio/${p.input_audio.format};base64,${p.input_audio.data}`);
 }
 
 export interface VaporSlots {
