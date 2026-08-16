@@ -173,6 +173,9 @@ def main():
                             help="How hard to think (default: high)")
     serve_parser.add_argument("--no-think", dest="think", action="store_false",
                             help="Disable model reasoning")
+    serve_parser.add_argument("--no-mmproj", dest="no_mmproj", action="store_true",
+        help="Ignore the multimodal projector even if it is installed "
+             "(saves ~990 MB of RAM; disables image and audio input)")
     serve_parser.add_argument("--no-preload", action="store_true",
                               help="Load the weights on the first message instead of at startup")
 
@@ -194,6 +197,9 @@ def main():
                             help="How hard to think (default: high)")
     web_parser.add_argument("--no-think", dest="think", action="store_false",
                             help="Disable model reasoning")
+    web_parser.add_argument("--no-mmproj", dest="no_mmproj", action="store_true",
+        help="Ignore the multimodal projector even if it is installed "
+             "(saves ~990 MB of RAM; disables image and audio input)")
     web_parser.add_argument("--no-preload", action="store_true",
                             help="Load the weights on the first message instead of at startup")
 
@@ -444,6 +450,8 @@ def main():
             openai_server.THINKING_ENABLED = args.think
         if args.think_level:
             openai_server.REASONING_EFFORT = args.think_level
+        if getattr(args, "no_mmproj", False):
+            openai_server.MMPROJ_ENABLED = False
         if args.new_key:
             openai_server.rotate_api_key()
         openai_server.serve(host=args.host, port=args.port, api_key=args.api_key,
@@ -460,6 +468,8 @@ def main():
             openai_server.THINKING_ENABLED = args.think
         if args.think_level:
             openai_server.REASONING_EFFORT = args.think_level
+        if getattr(args, "no_mmproj", False):
+            openai_server.MMPROJ_ENABLED = False
         host = "0.0.0.0" if args.share else args.host
         share = openai_server.configure_sharing(
             host, args.port, api_key=args.api_key,

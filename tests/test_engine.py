@@ -988,6 +988,42 @@ def test_multimodal_intake(port):
         check("the refusal names the media type",
               res.get("media_types") == ["image"], str(res.get("media_types")))
 
+    # --- opt-out and override ----------------------------------------------
+    original = s.MMPROJ_ENABLED
+    try:
+        s.MMPROJ_ENABLED = False
+        check("--no-mmproj leaves the projector unused",
+              s.build_chat_handler() is None, "handler built despite opt-out")
+    finally:
+        s.MMPROJ_ENABLED = original
+
+    old_env = os.environ.get("VAPOR_MMPROJ")
+    os.environ["VAPOR_MMPROJ"] = "/nonexistent-projector.gguf"
+    try:
+        check("VAPOR_MMPROJ pointing at nothing yields no projector",
+              paths.find_mmproj() is None, "phantom projector accepted")
+    finally:
+        if old_env is None:
+            os.environ.pop("VAPOR_MMPROJ", None)
+        else:
+            os.environ["VAPOR_MMPROJ"] = old_env
+
+    # --- when a projector IS installed, the capability must be real ---------
+    if s.mmproj_path():
+        check("an installed projector reports ready", s.multimodal_ready(),
+              "projector present but not usable")
+        from vapor_ram.gguf import read_gguf
+        parsed = read_gguf(s.mmproj_path())
+        names = [t["name"] for t in parsed["tensors"]]
+        check("the projector actually carries vision tensors",
+              any(n.startswith("v.") for n in names), "no vision tensors")
+        check("the projector actually carries audio tensors",
+              any(n.startswith("a.") or n.startswith("mm.a.") for n in names),
+              "no audio tensors")
+        check("the projector is not mistaken for model weights",
+              s.find_gguf(os.path.dirname(s.mmproj_path())) != s.mmproj_path(),
+              "projector would be loaded as the model")
+
     # --- text must be unaffected -------------------------------------------
     check("text-only content reports no media",
           s.message_media([{"role": "user", "content": "hello"}]) == [], "false positive")

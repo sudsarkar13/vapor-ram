@@ -1087,6 +1087,42 @@ def build_prompt(messages, preset, enable_thinking=None, effort=None):
     return prefix + "".join(rendered) + f"{TURN_OPEN}model\n"
 
 
+# Set false by --no-mmproj to leave the projector on disk unused.
+MMPROJ_ENABLED = True
+
+
+def build_chat_handler():
+    """Construct the multimodal chat handler, or None when unavailable.
+
+    Attaching this costs the projector's ~990 MB resident on top of the
+    weights, so it is only built when the file is actually present -- having
+    downloaded it is the opt-in. Failure is reported and non-fatal: a broken
+    projector must not stop text generation from working.
+    """
+    if not MMPROJ_ENABLED:
+        return None
+    projector = mmproj_path()
+    if not projector:
+        return None
+    try:
+        from llama_cpp.llama_chat_format import Gemma4ChatHandler
+    except Exception as e:
+        sys.stderr.write(
+            f"\033[33m[Multimodal] llama-cpp-python has no Gemma4 handler ({e}); "
+            f"image and audio input disabled.\033[0m\n")
+        return None
+    try:
+        handler = Gemma4ChatHandler(clip_model_path=projector, verbose=False)
+    except Exception as e:
+        sys.stderr.write(
+            f"\033[33m[Multimodal] Could not load {os.path.basename(projector)} "
+            f"({e}); image and audio input disabled.\033[0m\n")
+        return None
+    sys.stderr.write(
+        f"\033[36m[Multimodal] Projector loaded: {os.path.basename(projector)}\033[0m\n")
+    return handler
+
+
 def get_llama(gguf_file):
     """Return a Llama handle for `gguf_file` at the current n_ctx, loading if needed.
 
@@ -1128,9 +1164,14 @@ def get_llama(gguf_file):
 
     started = time.perf_counter()
     threads = optimal_thread_count()
+    # One model instance serves both paths. A second multimodal instance would
+    # double resident weights (7+ GB each), which does not fit the machines this
+    # targets; the handler is inert until create_chat_completion is given media.
+    chat_handler = build_chat_handler()
     try:
         llm = Llama(model_path=gguf_file, n_ctx=target_ctx,
                     n_threads=threads, n_threads_batch=threads,
+                    chat_handler=chat_handler,
                     verbose=False)
         applied_ctx = target_ctx
     except Exception as alloc_err:
@@ -1140,8 +1181,11 @@ def get_llama(gguf_file):
         set_model_state("loading", f"Retrying {name} at reduced context {fallback}…",
                         path=gguf_file, ctx=fallback)
         try:
+            # The handler must be carried over: dropping it here would leave
+            # multimodal silently disabled whenever the context retry fires.
             llm = Llama(model_path=gguf_file, n_ctx=fallback,
                         n_threads=threads, n_threads_batch=threads,
+                        chat_handler=chat_handler,
                         verbose=False)
             applied_ctx = fallback
         except Exception as e:
@@ -1151,6 +1195,7 @@ def get_llama(gguf_file):
         apply_context(fallback)
 
     llm._vapor_ctx_size = applied_ctx
+    llm._vapor_multimodal = chat_handler is not None
     llama_model_cache[gguf_file] = llm
     load_ms = round((time.perf_counter() - started) * 1000, 2)
     set_model_state("ready", f"{name} ready (n_ctx={applied_ctx}, loaded in {load_ms / 1000:.1f}s)",
@@ -1158,6 +1203,46 @@ def get_llama(gguf_file):
     sys.stderr.write(f"\033[32m[GGUF Engine] {name} ready in {load_ms / 1000:.1f}s "
                      f"({threads} threads)\033[0m\n")
     return llm
+
+
+def _multimodal_stream(llm, messages, preset, sampling, max_tokens,
+                       enable_thinking=None, effort=None):
+    """Stream a generation that includes media, via the chat handler.
+
+    Yields the same shape the raw-completion path does -- chunks carrying
+    `choices[0].text` -- so ThinkingSplitter and the token counter downstream
+    need no knowledge of which path produced them. create_chat_completion emits
+    `choices[0].delta.content` instead, so it is adapted here rather than
+    special-cased in five places.
+    """
+    payload = [m for m in messages if m.get("role") in ("system", "user", "assistant")]
+
+    # The handler applies the model's own chat template, which reads
+    # enable_thinking itself, so the reasoning flag is passed rather than
+    # baked into a hand-built string.
+    if enable_thinking is None:
+        enable_thinking = THINKING_ENABLED
+    level = REASONING_LEVELS[resolve_effort(effort)]
+    if enable_thinking and level.get("hint"):
+        payload = [{"role": "system", "content": level["hint"]}] + payload
+
+    completion = llm.create_chat_completion(
+        messages=payload,
+        max_tokens=max_tokens,
+        temperature=sampling.get("temperature", 0.2),
+        top_p=sampling.get("top_p", 0.95),
+        stop=STOP_SEQUENCES,
+        stream=True,
+    )
+    for chunk in completion:
+        try:
+            delta = chunk["choices"][0].get("delta") or {}
+        except (KeyError, IndexError):
+            continue
+        text = delta.get("content")
+        if not text:
+            continue
+        yield {"choices": [{"text": text}]}
 
 
 def generate_tokens(messages, preset, sampling, max_tokens, enable_thinking=None,
@@ -1178,6 +1263,7 @@ def generate_tokens(messages, preset, sampling, max_tokens, enable_thinking=None
             f"No .gguf weights found in '{current_model_path}'. "
             f"Download the model from the dashboard or run: ./vapor download")
 
+    media = message_media(messages)
     prompt = build_prompt(messages, preset, enable_thinking=enable_thinking,
                           effort=effort)
 
@@ -1185,18 +1271,34 @@ def generate_tokens(messages, preset, sampling, max_tokens, enable_thinking=None
     # corrupt it. Poll endpoints run on other threads and are unaffected.
     with _generation_lock:
         llm = get_llama(gguf_file)
+
+        # Media cannot travel the raw-completion path: an image becomes
+        # embeddings that must be interleaved into the context, which is what
+        # the chat handler exists to do. Text keeps the hand-built prompt --
+        # that is the path that fixed this model's prompt format in beta.2 and
+        # is the one under test -- so the branch is narrow by design.
+        use_handler = bool(media) and getattr(llm, "_vapor_multimodal", False)
+        if media and not use_handler:
+            raise EngineError(
+                "This request contains image or audio input, but the multimodal "
+                "projector is not loaded. Install it with: vapor download --mmproj")
+
         _slot_begin(gguf_file)
         try:
-            stream = llm(
-                prompt,
-                max_tokens=max_tokens,
-                temperature=sampling.get("temperature", 0.2),
-                top_p=sampling.get("top_p", 0.95),
-                # Real stop tokens for this model. The previous list used
-                # <end_of_turn>/<start_of_turn>, which are not in its vocabulary.
-                stop=STOP_SEQUENCES,
-                stream=True,
-            )
+            if use_handler:
+                stream = _multimodal_stream(llm, messages, preset, sampling,
+                                            max_tokens, enable_thinking, effort)
+            else:
+                stream = llm(
+                    prompt,
+                    max_tokens=max_tokens,
+                    temperature=sampling.get("temperature", 0.2),
+                    top_p=sampling.get("top_p", 0.95),
+                    # Real stop tokens for this model. The previous list used
+                    # <end_of_turn>/<start_of_turn>, which are not in its vocabulary.
+                    stop=STOP_SEQUENCES,
+                    stream=True,
+                )
             if stats is not None:
                 try:
                     stats["prompt_tokens"] = len(llm.tokenize(prompt.encode("utf-8")))
