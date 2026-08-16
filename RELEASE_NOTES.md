@@ -1,72 +1,85 @@
-# v1.0.7-alpha.4 — Alpha Release
+# v1.0.7-alpha.5 — Alpha Release
 
-## 🔄 What's Changed (v1.0.7-alpha.3 ➔ v1.0.7-alpha.4)
+## 🔄 What's Changed (v1.0.7-alpha.4 ➔ v1.0.7-alpha.5)
 
-- **Channel**: Alpha Release (Preview Channel)
-- **Target Model**: `google/gemma-4-E4B-it` (GGUF)
+This release makes the model usable from other devices, makes the server
+stoppable, and makes it roughly **28× faster** in the configuration it shipped
+with.
 
-This release repairs the installable package, reconnects the dashboard to the
-engine, and replaces reported metrics that were hardcoded rather than measured.
+### Network sharing
 
-### ⚠️ Read this first
+The model can now be reached from any device on your network. A key is required
+whenever the server binds a non-loopback interface, so exposing the engine
+cannot silently leave it open — `--no-auth` is the explicit opt-out and the
+banner says so. Keys live in `~/.vapor-ram/api_key` (mode `0600`), never in the
+tracked `vapor.json`.
 
-Two long-standing claims were wrong and are now corrected in the documentation:
+```bash
+vapor serve     # shared on the LAN, key required and printed
+vapor share     # URL, key, and paste-ready client snippets
+```
 
-- **`pip install vapor-ram` never worked.** The console entry point pointed at a
-  module that does not exist, so the installed `vapor` command failed instantly
-  with `ModuleNotFoundError`. The wheel also shipped without the dashboard,
-  presets or engine binary. Both are fixed and verified from a clean install.
-- **The 1.5 GB RAM ceiling is not yet achieved.** Generation runs through
-  llama.cpp, which memory-maps the full GGUF; measured RSS is around **6 GB**,
-  not the **142.3 MB** previously advertised. That figure was a hardcoded
-  constant in the API response, never a measurement. The C layer streamer is
-  built but not yet wired into the token path — that remains the primary work.
+Clients present the key as `Authorization: Bearer`, `X-API-Key`, or `?key=` —
+the last so a phone can open one tappable link.
 
-### 🐛 Fixed Bugs & Issues
+**Security fix:** authentication was previously only enforced on POST. Every GET
+was open to anyone who could reach the port even with `--api-key` set, including
+`/v1/system/progress` (filesystem paths) and `/v1/doctor` (hardware).
 
-- **Installed package was unusable**: broken `vapor:main` entry point; wheel
-  contained 12 files and no runtime assets.
-- **Dashboard read fields the server never sent**: the Doctor tab rendered the
-  literal string `undefined`, and the download-status check compared against a
-  value that could never match, so it never fired.
-- **Download progress was invisible**: percentage, transferred bytes and rate
-  were all served but nothing rendered them.
-- **Context window was reported dishonestly**: values up to 131072 were accepted
-  and persisted while generation silently clamped to 16384.
-- **Model directory was clobbered**: every settings save rewrote `model_dir`, so
-  changing the context window overwrote the active model path. The saved value
-  was also never restored on restart.
-- **Streaming was a replay animation**: the full response was generated before
-  the first byte was sent, then re-chunked with a fixed delay.
-- **Server was single-threaded**: any generation froze the whole dashboard.
-- **Chat had no memory**: only the last message reached the model.
-- **Presets did nothing**: the persona name was sent as a system message and
-  discarded server-side; `temperature` and `top_p` were never applied.
-- **`--api-key` was inert**: the key was never assigned to the request handler.
-- **Committed dashboard was incomplete**: an over-broad `dist/` ignore rule
-  excluded the JavaScript chunks, so a clean checkout shipped a blank UI.
-- **Release tarballs bundled `node_modules`** (~700 MB); now 1.2 MB.
+### Performance
 
-### ✨ New Features & Enhancements
+`n_threads` used `os.cpu_count()`, running one thread per hyperthread. On a
+Ryzen 7 5700U that costs **3.4×** throughput, because llama.cpp's kernels
+already saturate each core's vector units.
 
-- **Real telemetry**: measured process RSS and per-request host RAM, replacing
-  frozen and fabricated constants. Unmeasured values report as unavailable.
-- **Model architecture read from `config.json`** instead of three conflicting
-  hardcoded sets (42 layers / 2 KV heads / 18 shared for gemma-4-E4B-it).
-- **Model lifecycle state** so a multi-second weight load is visible.
-- **Download meter** with byte-accurate progress, rate, ETA and resume.
-- **New endpoints**: `/v1/presets` and `/v1/doctor`.
-- **Model directory picker** driven by the server-side scan.
-- **Generation metrics**: tokens/second and time-to-first-token.
-- **CLI parity**: `vapor chat` keeps history, streams tokens and applies presets;
-  added `vapor --version`.
-- **CI/CD**: matrix CI (Linux/macOS × Python 3.9/3.12), version-consistency and
-  packaging gates, and a tag-driven release pipeline with automatic
-  Stable/Beta/Alpha/RC channel handling and OIDC PyPI publishing.
-- **Tests**: expanded from 4 smoke assertions to 47 contract checks.
+| Threads | `n_ctx` | Decode | Peak RSS |
+| ---: | ---: | ---: | ---: |
+| 16 (old) | 16384 | 1.96 tok/s | 8.07 GB |
+| **8 (new)** | 16384 | 6.49 tok/s | 8.07 GB |
+| **8 (new)** | 4096 | **6.42–6.77 tok/s** | 6.80 GB |
 
-### 📦 Layout change for contributors
+Context size does not affect decode speed at all — only memory. Weights are now
+preloaded at startup, so the first message no longer pays the load on top of its
+own generation.
 
-Python modules now live in `vapor_ram/`. Update imports from
-`import openai_server` to `from vapor_ram import openai_server`. `./vapor` still
-works unchanged from a checkout.
+### Stopping the server
+
+CTRL+C was ignored while llama.cpp was loading or decoding, because a Python
+signal handler only runs when the main thread reaches the eval loop. Shutdown
+now waits in `sigwait()`, with signals blocked before any thread is created.
+For terminals that never deliver the signal at all, the foreground process group
+and `ISIG` state are detected and reported, `ISIG` is repaired when cleared, and
+a console watchdog reads `^C` as a raw byte. `vapor stop` works from anywhere.
+
+### Dashboard
+
+Headings on Brain Cortex, Profiling and Doctor rendered in Playfair Display, a
+serif whose hairlines are close to invisible at the 11–12px uppercase sizes
+those headings use. They now share the body sans.
+
+The KV cache figure was **8× low** — 216 MB reported against ~1.7 GB actually
+allocated. It counted K but not V, assumed int8 where llama.cpp defaults to f16,
+and excluded the shared-KV layers despite llama.cpp allocating a full-size SWA
+cache. Now within 13% of measured.
+
+### Removed
+
+VaporRAM has no thinking mode. The `coder` and `reasoner` presets prefixed their
+system instruction with `<|think|>` — not a Gemma control token, tokenised as
+literal text, consuming context for nothing. An `enable_thinking` config flag no
+code read is gone too.
+
+## ⚠️ Known Limitations
+
+- **The 1.5 GB RAM ceiling is not met.** llama.cpp memory-maps the full GGUF;
+  measured RSS is 6.8–8.1 GB depending on context size. The ceiling is a
+  planning target, not an enforced limit.
+- The `O_DIRECT` layer streamer in `c/streaming_io.c` builds but is not wired
+  into the token path, so per-layer streaming state is not reported.
+- Per-kernel attribution (attention vs. matmul vs. LM head) is not instrumented.
+
+## 📦 Install
+
+```bash
+pip install --pre vapor-ram==1.0.7a5
+```

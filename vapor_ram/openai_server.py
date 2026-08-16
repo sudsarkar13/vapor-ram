@@ -24,7 +24,7 @@ SAFE_GGUF_MAX_CONTEXT = 16384
 MIN_CONTEXT_WINDOW = 512
 DEFAULT_CONTEXT_WINDOW = 8192
 
-VERSION = "1.0.7-alpha.4"
+VERSION = "1.0.7-alpha.5"
 MODEL_ID = "google/gemma-4-E4B-it"
 
 # --- Network sharing -------------------------------------------------------

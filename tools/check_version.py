@@ -21,7 +21,7 @@ TARGETS = [
     ("pyproject.toml",          r'^version\s*=\s*"([^"]+)"',                    'version = "{v}"'),
     ("vapor_ram/openai_server.py", r'^VERSION\s*=\s*"([^"]+)"',                    'VERSION = "{v}"'),
     
-    ("c/vapor_engine.c",        r'VaporRAM Engine v([0-9][^\s\\]*)',            'VaporRAM Engine v{v}'),
+    ("c/vapor_engine.c",        r'#define VAPOR_VERSION "([^"]+)"',            '#define VAPOR_VERSION "{v}"'),
     ("tools/package_release.py", r'^VERSION\s*=\s*"([^"]+)"',                   'VERSION = "{v}"'),
     ("tools/download_model.py", r'USER_AGENT\s*=\s*"VaporRAM/([^\s"]+)',        'USER_AGENT = "VaporRAM/{v}'),
 ]

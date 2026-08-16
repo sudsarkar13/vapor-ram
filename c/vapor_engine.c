@@ -13,6 +13,8 @@
 #include "streaming_io.h"
 #include "kv_cache.h"
 
+#define VAPOR_VERSION "1.0.7-alpha.5"
+
 #define GEMMA_4_E4B_LAYERS 32
 #define GEMMA_HIDDEN_DIM 3072
 #define LAYER_BYTES (140 * 1024 * 1024) // ~140 MB per layer
@@ -59,7 +61,7 @@ void rmsnorm(float *o, const float *x, const float *weight, int size) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        fprintf(stderr, "VaporRAM Engine v1.0.7-alpha.4 (Ultra-Low RAM SSD Streaming Engine for Gemma 4 E4B-it)\n");
+        fprintf(stderr, "VaporRAM Engine v" VAPOR_VERSION " (Ultra-Low RAM SSD Streaming Engine for Gemma 4 E4B-it)\n");
         fprintf(stderr, "Usage: %s <model_weights.bin> [prompt]\n", argv[0]);
         return 1;
     }
@@ -67,7 +69,7 @@ int main(int argc, char **argv) {
     const char *model_path = argv[1];
     const char *prompt = (argc >= 3) ? argv[2] : "Hello";
 
-    fprintf(stderr, "=== VaporRAM Engine v1.0.7-alpha.3 ===\n");
+    fprintf(stderr, "=== VaporRAM Engine v" VAPOR_VERSION " ===\n");
     fprintf(stderr, "[Target Model] google/gemma-4-E4B-it\n");
     fprintf(stderr, "[RAM Ceiling ] < 1.5 GB\n");
     fprintf(stderr, "[Streaming IO] O_DIRECT SSD Double-Buffer (140 MB/layer)\n");

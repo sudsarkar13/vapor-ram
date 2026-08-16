@@ -4,6 +4,40 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 ---
 
+## [v1.0.7-alpha.5] - 2026-08-16
+
+### 🚀 Highlights & Features
+- **Network sharing**: the model can be used from other devices on the network. A key is required whenever the server binds a non-loopback interface, so exposing the engine cannot silently leave it open. Keys are generated on first use and stored in `~/.vapor-ram/api_key` (mode `0600`) — never in the tracked `vapor.json`. Clients may present the key as `Authorization: Bearer`, `X-API-Key`, or `?key=` so a phone can open a single tappable link.
+- **`vapor share`**: prints the LAN URL, key, paste-ready `curl` and OpenAI-SDK snippets, and tunnel-first guidance for remote access. It probes the running server, so it reports `--no-auth` honestly and warns when the stored key is not the one in use.
+- **`vapor stop`**: stops a server from another terminal via the same endpoint as the dashboard's Stop button.
+- **Weights preload at startup**: the first message no longer pays the ~5–9s load on top of its own generation. `--no-preload` restores the old behaviour.
+
+### 🐛 Fixed Bugs & Issues
+- **Authentication was only enforced on POST**: every GET was open to anyone who could reach the port even with `--api-key` set — including `/v1/system/progress` (filesystem paths) and `/v1/doctor` (hardware). All endpoints are now guarded; `/health` stays reachable but withholds telemetry until a key is presented.
+- **CTRL+C ignored while the engine was busy**: a Python signal handler only runs when the main thread reaches the eval loop, which does not happen while llama.cpp is loading or decoding. Shutdown now waits in `sigwait()` on a dedicated blocked signal set. Signals are blocked before any thread is created, so a thread that does not block them cannot absorb the interrupt.
+- **CTRL+C when the terminal never delivers the signal**: the foreground-process-group and `ISIG` state are now detected and reported, `ISIG` is repaired when found cleared, and a console watchdog reads `^C` as a raw byte. `SIGQUIT`/`SIGHUP` also stop the server.
+- **Serif headings on Brain Cortex, Profiling and Doctor**: `CardTitle` resolved `--font-heading` to Playfair Display, whose hairlines are nearly invisible at the 11–12px uppercase sizes these headings use. Headings now share the body sans; the unused font is dropped from the bundle.
+- **CPU oversubscription**: `n_threads` used `os.cpu_count()`, running one thread per hyperthread. Measured on a Ryzen 7 5700U, that costs **3.4×** throughput (1.96 → 6.49 tok/s). Threads are now counted from the CPU topology and overridable with `VAPOR_N_THREADS`.
+- **KV cache estimate 8× low**: the sidebar reported 216 MB where llama.cpp had allocated ~1.7 GB. The formula counted K but not V, assumed 1-byte int8 where llama.cpp defaults to f16, and excluded the shared-KV layers despite llama.cpp logging "using full-size SWA cache". Now within 13% of measured.
+- **Fake reasoning tokens**: the `coder` and `reasoner` presets prefixed their system instruction with `<|think|>`, which is not a Gemma control token — it was tokenised as literal text, consuming context for nothing. `config.py` also carried an `enable_thinking` flag no code read. Both removed; VaporRAM has no thinking mode.
+- **Startup banner lost when stdout was not a terminal**: block buffering plus `os._exit` skipping the flush discarded the banner — including the API key line — under a supervisor.
+- **API key leaked into logs**: the access log printed `?key=<secret>` verbatim; it is now redacted.
+- **Test suite overwrote the developer's `vapor.json`**: endpoints that persist config reset the real RAM ceiling and context window on every run. Tests now write to a temporary file.
+- **C engine banner two releases stale**: the runtime banner still read `v1.0.7-alpha.3`. Both strings now derive from one `VAPOR_VERSION` constant that `check_version.py` tracks.
+
+### 📊 Measured Performance
+Ryzen 7 5700U (8 physical / 16 logical), `gemma-4-E4B-it-Q4_K_M`, 32 decoded tokens:
+
+| Threads | `n_ctx` | Decode | Peak RSS |
+| ---: | ---: | ---: | ---: |
+| 16 | 16384 | 1.96 tok/s | 8.07 GB |
+| **8** | 16384 | 6.49 tok/s | 8.07 GB |
+| **8** | 4096 | **6.42–6.77 tok/s** | 6.80 GB |
+
+Context size does not affect decode speed — only memory. End-to-end through the HTTP API after these changes: **6.78 tok/s**, first token in 1.83s, model ready 6s after startup.
+
+---
+
 ## [v1.0.7-alpha.4] - 2026-08-15
 
 ### 🐛 Fixed Bugs & Issues
