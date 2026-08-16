@@ -2,11 +2,13 @@
 
 **VaporRAM** is a local inference server, CLI and web dashboard for **google/gemma-4-E4B-it**, packaged for consumer hardware.
 
-Its goal is to run the model under a **1.5 GB RAM ceiling** by streaming transformer layers directly from NVMe SSD storage. The streaming reader — unbuffered `O_DIRECT` reads with aligned double buffers and kernel prefetch hints — is implemented in pure C under [`c/`](c/).
+It provides an OpenAI-compatible HTTP API, a terminal chat client, network sharing behind an API key, and a dashboard that reports only measured values. Token generation runs on **llama.cpp**.
 
-> **Current status (alpha):** token generation runs through **llama.cpp**, which memory-maps the full GGUF file, so the RAM ceiling is **not achieved** — measured RSS with the Q4_K_M weights is 6.8–8.1 GB depending on context size.
+Its research goal is to run the model under a **1.5 GB RAM ceiling** by streaming transformer layers from NVMe rather than keeping them resident. The streaming reader — unbuffered `O_DIRECT` reads with aligned double buffers and kernel prefetch hints — is implemented in pure C under [`c/`](c/), and now reads the real byte ranges of each block resolved from the GGUF tensor directory. It is a measurement path, not the token path.
+
+> **Current status (beta):** the server, CLI, sharing and dashboard are feature-complete and tested. The **RAM ceiling is not met** — llama.cpp memory-maps the full GGUF, so measured RSS with the Q4_K_M weights is 6.8–8.1 GB depending on context size.
 >
-> The C streamer now reads the **real** byte ranges of each transformer block, resolved from the GGUF tensor directory, and the dashboard reports measured throughput for them. It is a measurement path, not the token path. Running it on this model gives a number worth knowing before going further: at a measured **~990 MB/s** under `O_DIRECT`, streaming all 42 blocks for every token would cost **~2.5 s/token (~0.4 tok/s)**, against **6.8 tok/s** with the weights resident. Trading roughly 17x throughput is what the 1.5 GB ceiling would cost on this hardware.
+> That is now a measured trade rather than an open question. At **~990 MB/s** under `O_DIRECT`, streaming all 42 blocks for every token would cost **~2.5 s/token (~0.4 tok/s)**, against **6.8 tok/s** with the weights resident — roughly **17x**. Reaching the ceiling means paying that, and writing a full inference engine to do it. The dashboard measures both numbers on your own hardware; treat the ceiling as a goal the project has costed, not a feature that is nearly done.
 
 [![PyPI version](https://img.shields.io/pypi/v/vapor-ram.svg)](https://pypi.org/project/vapor-ram/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/vapor-ram?color=06b6d4&style=flat-square)](https://pypi.org/project/vapor-ram/)

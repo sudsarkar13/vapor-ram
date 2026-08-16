@@ -4,6 +4,30 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 ---
 
+## [v1.0.7-beta.1] - 2026-08-16
+
+First beta. The code is identical to `v1.0.7-alpha.6`; what changes is the
+claim the project makes about itself.
+
+### 📌 What beta means here
+- **The inference server is feature-complete**: OpenAI-compatible API with real
+  token streaming, network sharing behind an API key with auth on every
+  endpoint, persona presets, a terminal chat client, model download with byte-
+  accurate progress, runtime context control, and a dashboard whose every
+  figure is measured rather than estimated. 112 automated checks cover it.
+- **The 1.5 GB RAM ceiling is a costed research goal, not a pending feature.**
+  Generation runs on llama.cpp, which memory-maps the full GGUF; measured RSS
+  is 6.8–8.1 GB. Streaming instead would cost ~2.5 s/token (~0.4 tok/s) against
+  6.8 tok/s resident — roughly 17x — and requires writing a full inference
+  engine. The README now leads with what VaporRAM is, with the ceiling stated
+  as a goal the project has measured the price of.
+
+### 🐛 Fixed Bugs & Issues
+- Documentation described the streaming engine as the product and the ceiling
+  as nearly delivered. Both are now stated accurately.
+
+---
+
 ## [v1.0.7-alpha.6] - 2026-08-16
 
 ### 🚀 Highlights & Features
