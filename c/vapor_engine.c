@@ -18,7 +18,7 @@
 #include <stdint.h>
 #include "streaming_io.h"
 
-#define VAPOR_VERSION "1.0.7-beta.2"
+#define VAPOR_VERSION "1.0.7-beta.3"
 #define MAX_LAYERS 512
 
 typedef struct {

@@ -157,6 +157,9 @@ export function Sidebar({
 	const [statusIsError, setStatusIsError] = useState(false);
 	const [thinkingBusy, setThinkingBusy] = useState(false);
 
+	const activeLevel = (progress?.reasoning_levels ?? []).find(
+		(l) => l.id === progress?.reasoning_effort,
+	);
 	const arch = progress?.architecture ?? FALLBACK_ARCH;
 	const totalHostRamGb = progress?.total_ram_gb ?? 16.0;
 	const availHostRamGb = progress?.avail_ram_gb ?? 8.0;
@@ -211,6 +214,19 @@ export function Sidebar({
 			!!res.warnings?.length);
 		onRefreshHealth();
 	}, [progress?.thinking_enabled, onRefreshHealth]);
+
+	const handleSetEffort = useCallback(
+		async (level: string) => {
+			setThinkingBusy(true);
+			const res = await updateServerConfig({ reasoning_effort: level });
+			setThinkingBusy(false);
+			if (!res) return report("Server unreachable — effort unchanged.", true);
+			report(res.message || `Reasoning effort set to ${level}.`,
+				!!res.warnings?.length);
+			onRefreshHealth();
+		},
+		[onRefreshHealth],
+	);
 
 	const saveSetting = useCallback(
 		async (params: { n_ctx?: number; ram_ceiling_gb?: number }) => {
@@ -597,39 +613,76 @@ export function Sidebar({
 				)}
 			</div>
 
-			{/* Reasoning toggle — only offered when the model's chat template
-			    actually implements a thinking channel. */}
+			{/* Reasoning. The switch and the effort levels are one control group:
+			    the levels are meaningless while reasoning is off, so they are
+			    disabled rather than hidden, which would make the panel jump. */}
 			{progress?.thinking_supported && (
-				<div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-2">
+				<div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-3">
 					<div className="flex items-center justify-between gap-2">
-						<label
-							htmlFor="thinking-toggle"
-							className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+						<span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
 							<Brain className="h-4 w-4 text-violet-400" />
 							Reasoning
-						</label>
+						</span>
 						<button
-							id="thinking-toggle"
 							type="button"
 							role="switch"
+							aria-label="Enable reasoning"
 							aria-checked={!!progress?.thinking_enabled}
 							disabled={thinkingBusy}
 							onClick={handleToggleThinking}
 							className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
 								progress?.thinking_enabled ? "bg-violet-500" : "bg-slate-700"
 							}`}>
+							{/* Positioned with left/right rather than a fractional
+							    translate: translate-x-4.5 is not a class Tailwind
+							    generates, so the knob sat outside the track. */}
 							<span
-								className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
-									progress?.thinking_enabled ? "translate-x-4.5" : "translate-x-0.5"
+								className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+									progress?.thinking_enabled ? "left-[18px]" : "left-0.5"
 								}`}
 							/>
 						</button>
 					</div>
+
+					<div
+						className={`grid grid-cols-4 gap-1 ${
+							progress?.thinking_enabled ? "" : "opacity-40 pointer-events-none"
+						}`}
+						role="group"
+						aria-label="Reasoning effort">
+						{(progress?.reasoning_levels ?? []).map((level) => {
+							const active = progress?.reasoning_effort === level.id;
+							return (
+								<button
+									key={level.id}
+									type="button"
+									aria-pressed={active}
+									title={level.description}
+									disabled={thinkingBusy || !progress?.thinking_enabled}
+									onClick={() => handleSetEffort(level.id)}
+									className={`rounded-md border px-1 py-1.5 text-[10px] font-medium transition-colors disabled:cursor-not-allowed ${
+										active
+											? "border-violet-500/60 bg-violet-500/20 text-violet-200"
+											: "border-slate-700 bg-slate-950 text-slate-400 hover:border-slate-600 hover:text-slate-200"
+									}`}>
+									{level.label === "Extra high" ? "X-High" : level.label}
+								</button>
+							);
+						})}
+					</div>
+
 					<p className="text-[10px] leading-snug text-slate-500">
-						{progress?.thinking_enabled
-							? "The model works through the problem before answering. Its reasoning appears above each reply and can be expanded."
-							: "The model answers directly. Reasoning usually improves harder questions but costs tokens and time."}
+						{!progress?.thinking_enabled
+							? "Off — the model answers directly. Reasoning usually helps on harder questions but costs tokens and time."
+							: (activeLevel?.description ??
+								"The model works through the problem before answering.")}
 					</p>
+					{progress?.thinking_enabled && activeLevel ? (
+						<p className="text-[10px] text-slate-600">
+							Reasoning budget ≈ {activeLevel.soft_cap.toLocaleString()} tokens
+							· shown above each reply
+						</p>
+					) : null}
 				</div>
 			)}
 

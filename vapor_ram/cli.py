@@ -132,6 +132,9 @@ def main():
     run_parser.add_argument("--preset", default=None, help="Preset name (e.g. coder, reasoner, concise)")
     run_parser.add_argument("--think", dest="think", action="store_true", default=None,
                             help="Show the model's reasoning (default: on when supported)")
+    run_parser.add_argument("--think-level", dest="think_level", default=None,
+                            choices=["low", "medium", "high", "xhigh"],
+                            help="How hard to think (default: high)")
     run_parser.add_argument("--no-think", dest="think", action="store_false",
                             help="Skip reasoning and answer directly")
 
@@ -139,6 +142,9 @@ def main():
     chat_parser.add_argument("--preset", default=None, help="Preset name (e.g. coder, reasoner, concise)")
     chat_parser.add_argument("--think", dest="think", action="store_true", default=None,
                             help="Show the model's reasoning (default: on when supported)")
+    chat_parser.add_argument("--think-level", dest="think_level", default=None,
+                            choices=["low", "medium", "high", "xhigh"],
+                            help="How hard to think (default: high)")
     chat_parser.add_argument("--no-think", dest="think", action="store_false",
                             help="Skip reasoning and answer directly")
 
@@ -153,6 +159,9 @@ def main():
                               help="Serve without an API key (anyone who can reach the port can use the model)")
     serve_parser.add_argument("--think", dest="think", action="store_true", default=None,
                             help="Enable model reasoning (default: on when the model supports it)")
+    serve_parser.add_argument("--think-level", dest="think_level", default=None,
+                            choices=["low", "medium", "high", "xhigh"],
+                            help="How hard to think (default: high)")
     serve_parser.add_argument("--no-think", dest="think", action="store_false",
                             help="Disable model reasoning")
     serve_parser.add_argument("--no-preload", action="store_true",
@@ -171,6 +180,9 @@ def main():
                             help="Skip API key authentication even when sharing")
     web_parser.add_argument("--think", dest="think", action="store_true", default=None,
                             help="Enable model reasoning (default: on when the model supports it)")
+    web_parser.add_argument("--think-level", dest="think_level", default=None,
+                            choices=["low", "medium", "high", "xhigh"],
+                            help="How hard to think (default: high)")
     web_parser.add_argument("--no-think", dest="think", action="store_false",
                             help="Disable model reasoning")
     web_parser.add_argument("--no-preload", action="store_true",
@@ -267,6 +279,8 @@ def main():
         if want_think is None:
             want_think = openai_server.THINKING_ENABLED
         want_think = want_think and openai_server.detect_thinking_support()
+        if args.think_level:
+            openai_server.REASONING_EFFORT = args.think_level
 
         state = {"in_think": False}
 
@@ -314,7 +328,10 @@ def main():
         think_state = {"on": args.think if args.think is not None
                        else openai_server.THINKING_ENABLED}
         think_state["on"] = think_state["on"] and openai_server.detect_thinking_support()
+        if args.think_level:
+            openai_server.REASONING_EFFORT = args.think_level
         print(f" Thinking: \033[1;35m{'on' if think_state['on'] else 'off'}\033[0m"
+              f" \033[90m(effort: {openai_server.REASONING_EFFORT})\033[0m"
               f" \033[1;30m(/think to toggle)\033[0m")
         print(" Commands: \033[1;30m/stats, /presets, /think, /clear, /reset, /exit\033[0m\n")
 
@@ -403,6 +420,8 @@ def main():
         openai_server.block_shutdown_signals()
         if args.think is not None:
             openai_server.THINKING_ENABLED = args.think
+        if args.think_level:
+            openai_server.REASONING_EFFORT = args.think_level
         if args.new_key:
             openai_server.rotate_api_key()
         openai_server.serve(host=args.host, port=args.port, api_key=args.api_key,
@@ -417,6 +436,8 @@ def main():
         openai_server.block_shutdown_signals()
         if args.think is not None:
             openai_server.THINKING_ENABLED = args.think
+        if args.think_level:
+            openai_server.REASONING_EFFORT = args.think_level
         host = "0.0.0.0" if args.share else args.host
         share = openai_server.configure_sharing(
             host, args.port, api_key=args.api_key,

@@ -544,6 +544,54 @@ def test_thinking_mode():
     check("thinking state is exposed in telemetry",
           {"thinking_enabled", "thinking_supported"} <= set(s.telemetry_snapshot()))
 
+    # --- reasoning effort levels -----------------------------------------
+    check("four effort levels are defined",
+          list(s.REASONING_LEVELS) == ["low", "medium", "high", "xhigh"],
+          str(list(s.REASONING_LEVELS)))
+    check("default effort is high", s.DEFAULT_REASONING_EFFORT == "high",
+          s.DEFAULT_REASONING_EFFORT)
+    check("every level carries a hint, cap and description",
+          all({"label", "hint", "soft_cap", "description"} <= set(v)
+              and v["soft_cap"] > 0
+              for v in s.REASONING_LEVELS.values()))
+    check("caps increase with effort",
+          [s.REASONING_LEVELS[k]["soft_cap"] for k in
+           ("low", "medium", "high", "xhigh")]
+          == sorted(s.REASONING_LEVELS[k]["soft_cap"] for k in
+                    ("low", "medium", "high", "xhigh")))
+
+    check("unknown effort falls back instead of raising",
+          s.resolve_effort("ultra") in s.REASONING_LEVELS)
+    check("known effort is honoured", s.resolve_effort("low") == "low")
+    check("effort names are case-insensitive", s.resolve_effort("XHigh") == "xhigh")
+
+    # The level must actually reach the prompt, not just the config.
+    low = s.build_prompt([{"role": "user", "content": "hi"}], s.PRESETS["default"],
+                         enable_thinking=True, effort="low")
+    xhigh = s.build_prompt([{"role": "user", "content": "hi"}], s.PRESETS["default"],
+                           enable_thinking=True, effort="xhigh")
+    check("effort hint reaches the prompt",
+          s.REASONING_LEVELS["low"]["hint"] in low
+          and s.REASONING_LEVELS["xhigh"]["hint"] in xhigh)
+    check("different levels produce different prompts", low != xhigh)
+    check("the hint precedes any persona instruction",
+          s.build_prompt([{"role": "user", "content": "hi"}], s.PRESETS["coder"],
+                         enable_thinking=True, effort="low")
+          .index(s.REASONING_LEVELS["low"]["hint"]) <
+          s.build_prompt([{"role": "user", "content": "hi"}], s.PRESETS["coder"],
+                         enable_thinking=True, effort="low")
+          .index("software engineer"))
+    check("no effort hint leaks in when thinking is off",
+          all(v["hint"] not in s.build_prompt(
+                  [{"role": "user", "content": "hi"}], s.PRESETS["default"],
+                  enable_thinking=False, effort="xhigh")
+              for v in s.REASONING_LEVELS.values()))
+
+    tele = s.telemetry_snapshot()
+    check("effort and level list are exposed to the dashboard",
+          tele.get("reasoning_effort") in s.REASONING_LEVELS
+          and len(tele.get("reasoning_levels", [])) == 4)
+
 
 def test_network_sharing():
     """Authenticated sharing. Runs last: enabling auth flips module-level state

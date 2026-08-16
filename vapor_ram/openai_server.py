@@ -24,7 +24,7 @@ SAFE_GGUF_MAX_CONTEXT = 16384
 MIN_CONTEXT_WINDOW = 512
 DEFAULT_CONTEXT_WINDOW = 8192
 
-VERSION = "1.0.7-beta.2"
+VERSION = "1.0.7-beta.3"
 
 # Reasoning is on by default: this model supports it natively and the answers
 # are better for it. Operators can turn it off globally, and callers can
@@ -34,6 +34,59 @@ THINKING_ENABLED = True
 # Set from the active GGUF: true when the model's own chat template understands
 # the thinking channel. Without it, turning the switch on would do nothing.
 THINKING_SUPPORTED = False
+
+# How hard the model should think. The chat template has no effort parameter --
+# it only takes a boolean -- so these are VaporRAM's own, and the mechanism is
+# stated plainly rather than implied: `hint` is appended to the system turn and
+# is what actually steers depth, while `soft_cap` is the reasoning-token budget
+# used to keep room for an answer and to flag when a level is being overrun.
+REASONING_LEVELS = {
+    "low": {
+        "label": "Low",
+        "hint": "Think briefly: a few short steps, then answer.",
+        "soft_cap": 256,
+        "description": "A few quick steps. Fastest, best for simple questions.",
+    },
+    "medium": {
+        "label": "Medium",
+        "hint": "Think concisely, covering the main steps before answering.",
+        "soft_cap": 768,
+        "description": "Covers the main steps without labouring them.",
+    },
+    "high": {
+        "label": "High",
+        "hint": ("Think carefully. Work through the problem step by step and "
+                 "check your reasoning before answering."),
+        "soft_cap": 2048,
+        "description": "Works through the problem and checks itself. Default.",
+    },
+    "xhigh": {
+        "label": "Extra high",
+        "hint": ("Think exhaustively. Consider alternative approaches, test your "
+                 "assumptions, and verify each step before answering."),
+        "soft_cap": 4096,
+        "description": "Explores alternatives and verifies each step. Slowest.",
+    },
+}
+DEFAULT_REASONING_EFFORT = "high"
+REASONING_EFFORT = DEFAULT_REASONING_EFFORT
+
+
+try:
+    _cfg_effort = str(_vapor_cfg.get("reasoning_effort", DEFAULT_REASONING_EFFORT)).lower()
+    if _cfg_effort in REASONING_LEVELS:
+        REASONING_EFFORT = _cfg_effort
+except Exception:
+    pass
+
+
+def resolve_effort(value):
+    """Normalise an effort name, falling back to the configured default."""
+    if isinstance(value, str):
+        key = value.strip().lower()
+        if key in REASONING_LEVELS:
+            return key
+    return REASONING_EFFORT if REASONING_EFFORT in REASONING_LEVELS else DEFAULT_REASONING_EFFORT
 MODEL_ID = "google/gemma-4-E4B-it"
 
 # --- Network sharing -------------------------------------------------------
@@ -452,6 +505,7 @@ def save_active_config():
             "ram_ceiling_gb": ram_ceiling_gb,
             "n_ctx": n_ctx,
             "enable_thinking": THINKING_ENABLED,
+            "reasoning_effort": REASONING_EFFORT,
         }
         with open(VAPOR_CONFIG_PATH, "w") as f:
             json.dump(cfg, f, indent=2)
@@ -552,6 +606,12 @@ def telemetry_snapshot():
         },
         "thinking_enabled": THINKING_ENABLED,
         "thinking_supported": THINKING_SUPPORTED,
+        "reasoning_effort": REASONING_EFFORT,
+        "reasoning_levels": [
+            {"id": key, "label": v["label"], "description": v["description"],
+             "soft_cap": v["soft_cap"]}
+            for key, v in REASONING_LEVELS.items()
+        ],
         "n_threads": optimal_thread_count(),
         "physical_cores": physical_core_count(),
         "logical_cores": os.cpu_count(),
@@ -853,7 +913,7 @@ def _as_bool(value, fallback):
     return fallback
 
 
-def build_prompt(messages, preset, enable_thinking=None):
+def build_prompt(messages, preset, enable_thinking=None, effort=None):
     """Render the conversation in gemma-4-E4B-it's real instruction format.
 
     Structure comes from the chat template embedded in the GGUF:
@@ -869,6 +929,7 @@ def build_prompt(messages, preset, enable_thinking=None):
     """
     if enable_thinking is None:
         enable_thinking = THINKING_ENABLED
+    level = REASONING_LEVELS[resolve_effort(effort)]
 
     system_parts = []
     if preset.get("system_instruction"):
@@ -907,6 +968,9 @@ def build_prompt(messages, preset, enable_thinking=None):
         prefix = f"{TURN_OPEN}system\n"
         if enable_thinking:
             prefix += f"{THINK_TOKEN}\n"
+            # The depth hint sits with the thinking token, before any persona
+            # instruction, so a preset cannot accidentally override it.
+            system_parts.insert(0, level["hint"])
         if system_parts:
             prefix += "\n\n".join(p.strip() for p in system_parts)
         prefix += f"{TURN_CLOSE}\n"
@@ -987,7 +1051,8 @@ def get_llama(gguf_file):
     return llm
 
 
-def generate_tokens(messages, preset, sampling, max_tokens, enable_thinking=None):
+def generate_tokens(messages, preset, sampling, max_tokens, enable_thinking=None,
+                    effort=None):
     """Yield generated text pieces as llama.cpp decodes them.
 
     This is a generator: the caller can forward each piece to the client immediately.
@@ -998,7 +1063,8 @@ def generate_tokens(messages, preset, sampling, max_tokens, enable_thinking=None
             f"No .gguf weights found in '{current_model_path}'. "
             f"Download the model from the dashboard or run: ./vapor download")
 
-    prompt = build_prompt(messages, preset, enable_thinking=enable_thinking)
+    prompt = build_prompt(messages, preset, enable_thinking=enable_thinking,
+                          effort=effort)
 
     # llama.cpp keeps one mutable context per model; concurrent generations would
     # corrupt it. Poll endpoints run on other threads and are unaffected.
@@ -1495,6 +1561,20 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                     msg_parts.append(
                         f"Reasoning {'enabled' if new_value else 'disabled'}")
 
+            if any(k in payload for k in ("reasoning_effort", "thinking_level")):
+                global REASONING_EFFORT
+                requested = str(payload.get("reasoning_effort")
+                                or payload.get("thinking_level") or "").strip().lower()
+                if requested not in REASONING_LEVELS:
+                    warnings.append(
+                        f"Unknown reasoning level '{requested}'. "
+                        f"Valid levels: {', '.join(REASONING_LEVELS)}.")
+                elif requested != REASONING_EFFORT:
+                    REASONING_EFFORT = requested
+                    updated = True
+                    msg_parts.append(
+                        f"Reasoning effort set to {REASONING_LEVELS[requested]['label']}")
+
             if "n_ctx" in payload:
                 effective, was_clamped = clamp_context(payload["n_ctx"])
                 if was_clamped:
@@ -1651,17 +1731,22 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
                 want_thinking = _as_bool(payload[key], THINKING_ENABLED)
                 break
 
+        want_effort = resolve_effort(
+            payload.get("reasoning_effort") or payload.get("thinking_level"))
+
         response_id = f"gen-{int(time.time() * 1000)}"
 
         if stream_mode:
             return self._stream_completion(response_id, messages, preset, sampling,
-                                           max_tokens, enable_thinking=want_thinking)
+                                           max_tokens, enable_thinking=want_thinking,
+                                           effort=want_effort)
 
         started = time.perf_counter()
         try:
             reasoning_parts, answer_parts = [], []
             for channel, piece in generate_tokens(messages, preset, sampling,
-                                                  max_tokens, enable_thinking=want_thinking):
+                                                  max_tokens, enable_thinking=want_thinking,
+                                                  effort=want_effort):
                 if channel == "truncated":
                     answer_parts.append(f"\n\n\u26a0\ufe0f {piece}")
                     continue
@@ -1699,7 +1784,7 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         })
 
     def _stream_completion(self, response_id, messages, preset, sampling, max_tokens,
-                           enable_thinking=None):
+                           enable_thinking=None, effort=None):
         """Emit SSE deltas as llama.cpp produces them.
 
         Headers go out before generation starts, so the client sees the connection
@@ -1745,7 +1830,8 @@ class VaporRequestHandler(BaseHTTPRequestHandler):
         try:
             for channel, piece in generate_tokens(messages, preset, sampling,
                                                   max_tokens,
-                                                  enable_thinking=enable_thinking):
+                                                  enable_thinking=enable_thinking,
+                                                  effort=effort):
                 # Time to first token is when the user first sees output, which
                 # is the first reasoning token when thinking is on. Counting
                 # only answer tokens made a 19s reasoning pass read as

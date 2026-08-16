@@ -36,6 +36,13 @@ export interface ModelArchitecture {
 	layer_buffer_mb: number;
 }
 
+export interface ReasoningLevel {
+	id: string;
+	label: string;
+	description: string;
+	soft_cap: number;
+}
+
 /** Shared live-metrics block returned by every status endpoint. */
 export interface Telemetry {
 	n_ctx: number;
@@ -50,6 +57,8 @@ export interface Telemetry {
 	/** Reasoning: whether it is on, and whether the model supports it at all. */
 	thinking_enabled: boolean;
 	thinking_supported: boolean;
+	reasoning_effort: string;
+	reasoning_levels: ReasoningLevel[];
 	ram_ceiling_gb: number;
 	total_ram_gb: number;
 	avail_ram_gb: number;
@@ -397,6 +406,7 @@ export const updateServerConfig = (params: {
 	ram_ceiling_gb?: number;
 	n_ctx?: number;
 	thinking?: boolean;
+	reasoning_effort?: string;
 	/** Only send this when the user actually intends to change the model directory. */
 	model_dir?: string;
 }) => postJson<ServerConfig>("/v1/system/config", params, "config update");

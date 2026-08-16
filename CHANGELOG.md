@@ -6,6 +6,18 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 
 
 
+## [v1.0.7-beta.3] - 2026-08-16
+
+### 🚀 Highlights & Features
+- **Reasoning effort levels**: `low`, `medium`, `high` (default) and `xhigh`. Settable in the sidebar, via `POST /v1/system/config`, per request with `{"reasoning_effort": "low"}`, and from the CLI with `--think-level` on `serve`, `web`, `run` and `chat`. Persisted to `vapor.json`.
+- The model's chat template has no effort parameter — it takes only a boolean — so these are VaporRAM's own and the mechanism is stated rather than implied: each level contributes a depth instruction placed with the thinking token at the top of the system turn, ahead of any persona instruction so a preset cannot override it, plus a reasoning-token budget shown in the UI.
+
+### 🐛 Fixed Bugs & Issues
+- **The reasoning switch rendered broken**: its knob used `translate-x-4.5`, which Tailwind does not generate — the emitted CSS was a stray `.translate-x-4` and an invalid `.translate-x-`, so the knob sat outside its track. Positioned with `left` values that Tailwind does emit.
+- Invalid effort levels are refused with the valid set named, rather than being silently accepted.
+
+---
+
 ## [v1.0.7-beta.2] - 2026-08-16
 
 ### 🚀 Highlights & Features
