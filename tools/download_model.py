@@ -35,7 +35,7 @@ FALLBACK_REPO = "google/gemma-4-E4B-it-qat-q4_0-gguf"
 FALLBACK_FILENAME = "gemma-4-E4B_q4_0-it.gguf"
 CONFIG_URL = "https://huggingface.co/google/gemma-4-E4B-it/resolve/main/config.json"
 
-USER_AGENT = "VaporRAM/1.0.8-alpha.1 GGUF Downloader"
+USER_AGENT = "VaporRAM/1.0.8-alpha.2 GGUF Downloader"
 MIN_VALID_GGUF_BYTES = 100 * 1024 * 1024  # a real quantised Gemma file is >> 100 MB
 
 

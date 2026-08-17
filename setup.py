@@ -75,7 +75,7 @@ class build_py(_build_py):
 
 setup(
     name="vapor-ram",
-    version="1.0.8-alpha.1",
+    version="1.0.8-alpha.2",
     description="Local LLM inference server, CLI and dashboard for google/gemma-4-E4B-it",
     long_description=open("README.md", encoding="utf-8").read() if os.path.exists("README.md") else "",
     long_description_content_type="text/markdown",

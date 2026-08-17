@@ -24,7 +24,7 @@ SAFE_GGUF_MAX_CONTEXT = 16384
 MIN_CONTEXT_WINDOW = 512
 DEFAULT_CONTEXT_WINDOW = 8192
 
-VERSION = "1.0.8-alpha.1"
+VERSION = "1.0.8-alpha.2"
 
 # Reasoning is on by default: this model supports it natively and the answers
 # are better for it. Operators can turn it off globally, and callers can

@@ -1,108 +1,87 @@
-# v1.0.8-alpha.1 — Alpha Release
+# v1.0.8-alpha.2 — Alpha Release
 
-## 🔄 What's Changed (v1.0.7 ➔ v1.0.8-alpha.1)
+## 🔄 What's Changed (v1.0.8-alpha.1 ➔ v1.0.8-alpha.2)
 
-**The model can see.** Image input works end to end — API, CLI and dashboard.
+**The model can hear speech.** alpha.1 gave it eyes; this one gives it ears —
+and is equally specific about what those ears cannot do.
 
-This is an alpha because the feature is new and wants testing on hardware that
-is not mine, not because anything here is known to be broken. Everything below
-was verified against the real model.
+## 🎙️ Speech input
 
-## 👁️ Image input
-
-`google/gemma-4-E4B-it` is multimodal upstream, but the GGUF everyone downloads
-is a text-only conversion — of its 720 tensors, none are vision or audio. The
-missing piece is a **projector** file, and it turns out to have been sitting in
-the same repository as the weights all along.
-
-```bash
-vapor download --mmproj      # 990 MB: the vision and audio towers
-vapor web                    # attach button appears in the composer
-```
-
-Verified with three generated images, none of whose content appears in the
+Verified against real clips of known speech, none of whose words appear in the
 prompt:
 
-| Image | Model's answer |
-| :--- | :--- |
-| Red disc on white | *"The image contains a red circle."* |
-| Blue square | *"The shape is a square and the color is blue."* |
-| Green triangle | *"The shape is a triangle and the color is green."* |
+| Clip | Says | Model's answer |
+| :--- | :--- | :--- |
+| `Front_Center.wav` | "Front Center" | *"front center"* |
+| `Rear_Center.wav` | "Rear Center" | *"rear center"* |
+| `Front_Left.wav` | "Front Left" | *"front left"* |
 
-Three for three, shape and colour both correct.
+Verbatim in every case.
+
+**Images and audio mix.** Asked about a red shape and a speech clip in the same
+message, the model answered *"The shape is red, and the words spoken are
+'front, center'."* Both processed, and the ordering held — which matters more
+than it looks (see below).
 
 ### In the dashboard
 
-An attach button beside the composer — multi-select, removable thumbnail
-previews, and **pasting a screenshot straight into the input works**. An image
-on its own is a valid message, and sent images stay visible in the transcript.
+A second attach button beside the composer, with a player in both the preview
+strip and the transcript. The image and audio buttons are gated **separately**,
+because a projector may carry one tower and not the other.
 
 ### Over the API
 
-Standard OpenAI content parts, streaming and not:
+The standard OpenAI shape, streaming and not:
 
 ```json
-{"messages": [{"role": "user", "content": [
-  {"type": "text", "text": "What is in this image?"},
-  {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
-]}]}
+{"type": "input_audio", "input_audio": {"data": "<base64 wav>", "format": "wav"}}
 ```
 
-Ask before uploading — `/health` reports what the server can actually accept:
+An `audio` part carrying a `data:` URL works too; both normalise to the same
+thing.
 
-```json
-{"multimodal": {"ready": true, "projector": "mmproj-F16.gguf",
-                "accepts": ["image", "audio", "video"]}}
-```
+## ⚠️ What audio is good for — and what it is not
 
-## 📊 What it costs
+**The encoder is speech-trained.** It transcribes speech accurately. It is
+**not** a general audio-description model.
 
-Measured A/B on an AMD Ryzen 7 5700U (8c/16t, 15 GB, NVMe) at `n_ctx` 16384,
-identical conditions with one variable:
+That is not a hedge, it is a measurement. Fed a 440 Hz tone, two seconds of
+silence, and two seconds of white noise, it returned **the same** description
+for all three — *"a gentle, rhythmic tapping"*. Silence and white noise are
+maximally different signals; identical answers mean it was not hearing them.
+That result is what sent us looking for real speech, where it turned out to work
+perfectly.
 
-| | |
-| :--- | ---: |
-| RSS with the projector enabled | 6.06 GB |
-| RSS with `--no-mmproj` | 5.61 GB |
-| **Cost of enabling vision** | **0.44 GB** |
+Use it for speech. Do not trust it on sound effects or music. 16 kHz mono WAV is
+what the projector expects.
 
-Processing an actual image did not raise it further. The projector is
-memory-mapped like the weights, so it costs far less resident than its 990 MB on
-disk. `--no-mmproj` on `serve` and `web` gets that back.
+**Video is still not implemented.** The projector reports no video tower, so a
+video part is refused with a 400 naming what the server does accept, rather than
+becoming a marker the model would describe from nothing.
 
 ## 🐛 Fixed
 
-- **A multimodal request used to produce confident nonsense.** `build_prompt`
-  coerced `content` with `str()`, so a content-part array reached the model as a
-  Python dict repr with the base64 inline. It did not error — it answered about
-  nothing.
-- **The capability report ignored `--no-mmproj`**, so a server told to ignore
-  its projector still advertised `ready: true`. The dashboard enabled its attach
-  button and the request failed mid-generation. Caught while testing the gate.
-- **A projector could have been loaded as the model** — it is also a `.gguf` of
-  comparable size sitting beside the weights, and `find_gguf` took the first
-  match, working only because `g` sorts before `m`.
-- **The context-retry fallback dropped the chat handler**, which would have
-  disabled multimodal silently on any machine that had to reduce `n_ctx`.
+- **`/health` advertised capabilities the server did not have.** `accepts` was
+  hard-coded to `["image", "audio", "video"]` whenever any projector was
+  present — naming two things that were not wired up. It now reads the
+  projector's own tensor directory (`v.*` → image, `a.*` → audio), so it
+  describes the file actually installed. Video is never advertised.
 
-## ⚠️ Known limitations
-
-- **Audio and video are not wired up.** The projector carries the audio tower
-  and the tokens and template are in place, but audio needs input decoding and
-  resampling first. Sending either is refused rather than mishandled.
-- Images are capped at **8 MB** and travel inline as data URLs, so they cost
-  context as well as bandwidth.
-- The projector is a separate **990 MB** download.
+- **Media was grouped by kind instead of document order.** The template emits
+  one marker per media part and bitmaps are consumed positionally, so grouping
+  images ahead of audio would have paired the wrong bitmap with the wrong marker
+  in any mixed message. Document order now holds, with a test pinning it.
 
 ## ✅ Testing
 
-**207 checks pass**, up from 164 at v1.0.7.
+**219 checks pass**, up from 207 at v1.0.8-alpha.1.
 
 ## 📦 Install
 
 ```bash
-pip install vapor-ram==1.0.8a1
+pip install vapor-ram==1.0.8a2
 vapor download --mmproj
 ```
 
-Stable users are unaffected — `pip install vapor-ram` still resolves to v1.0.7.
+Stable users are unaffected — `pip install vapor-ram` still resolves to v1.0.7,
+and the documentation site continues to advertise stable only.

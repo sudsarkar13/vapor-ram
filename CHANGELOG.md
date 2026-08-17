@@ -5,6 +5,73 @@ All notable changes to the **VaporRAM** project will be documented in this file.
 ---
 
 
+## [v1.0.8-alpha.2] - 2026-08-17
+
+Second alpha of the 1.0.8 line. **The model can hear speech.** Audio input works
+end to end — API and dashboard — and this entry is as specific about what the
+encoder cannot do as about what it can.
+
+### 🚀 Highlights & Features
+
+- **Speech transcription, verified working.** Real clips of known speech, none
+  of whose words appear in the prompt:
+
+  | Clip | Says | Model's answer |
+  | :--- | :--- | :--- |
+  | `Front_Center.wav` | "Front Center" | "front center" |
+  | `Rear_Center.wav` | "Rear Center" | "rear center" |
+  | `Front_Left.wav` | "Front Left" | "front left" |
+
+  Verbatim in every case.
+
+- **Images and audio mix in one message.** Asked about a red shape and a speech
+  clip together, the model answered *"The shape is red, and the words spoken are
+  'front, center'."* — both media processed, and the ordering held.
+
+- **Attach audio in the dashboard.** A second button beside the composer with a
+  player in both the preview strip and the transcript. The image and audio
+  buttons are gated **separately**, because a projector may carry one tower and
+  not the other.
+
+- **OpenAI audio content parts** on `/v1/chat/completions`: `input_audio` with a
+  bare base64 payload and a `format`, or an `audio` part carrying a `data:` URL.
+  Both shapes normalise to the same internal representation.
+
+### 🐛 Fixed Bugs & Issues
+
+- **`/health` advertised capabilities the server did not have.** `accepts` was
+  the hard-coded list `["image", "audio", "video"]` whenever any projector was
+  present — naming two things that were not wired up. It is now derived from the
+  projector's own tensor directory: a `v.*` tower means image, an `a.*` tower
+  means audio. It describes the file actually installed, and **video is never
+  advertised**.
+
+- **Media was collected grouped by kind rather than in document order.** The
+  chat template emits one marker per media part and the runtime consumes bitmaps
+  positionally, so grouping images before audio would have paired the wrong
+  bitmap with the wrong marker in any mixed message. Collection now follows
+  document order, and a test pins it.
+
+### ⚠️ What audio is and is not
+
+**The encoder is speech-trained.** It transcribes speech accurately. It is
+**not** a general audio-description model, and the evidence is direct: fed a
+440 Hz tone, two seconds of silence, and two seconds of white noise, it returned
+*the same* description for all three — "a gentle, rhythmic tapping". Silence and
+white noise are maximally different signals; identical answers mean it was not
+hearing them.
+
+Use it for speech. Do not trust it on sound effects or music. 16 kHz mono WAV is
+what the projector expects.
+
+**Video remains unimplemented.** The projector reports no video tower, so a
+video part is refused with a 400 naming what the server does accept, rather than
+becoming a marker the model would describe from nothing.
+
+### ✅ Testing
+
+**219 checks pass**, up from 207 at v1.0.8-alpha.1.
+
 
 ## [v1.0.8-alpha.1] - 2026-08-17
 
